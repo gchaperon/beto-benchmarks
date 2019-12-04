@@ -520,11 +520,11 @@ def main():
         raise ValueError("Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(args.output_dir))
 
     # Setup CUDA, GPU & distributed training
-    if args.no_cuda or torch.cuda.is_available():
+    if args.no_cuda or not torch.cuda.is_available():
         device = torch.device("cpu")
     else:
         device = torch.device("cuda")
-        args.n_gpu = torch.cuda.device_count()
+    args.n_gpu = torch.cuda.device_count()
     args.device = device
 
     # Setup logging
