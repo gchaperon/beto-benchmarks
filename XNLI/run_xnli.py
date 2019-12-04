@@ -257,16 +257,10 @@ def train(args, train_dataset, model, tokenizer):
     global_step = 0
     tr_loss, logging_loss = 0.0, 0.0
     model.zero_grad()
-    train_iterator = trange(
-        int(args.num_train_epochs),
-        desc="Epoch",
-        disable=args.local_rank not in [-1, 0])
+    train_iterator = trange(int(args.num_train_epochs), desc="Epoch")
     set_seed(args)  # Added here for reproductibility (between python 2 and 3)
     for _ in train_iterator:
-        epoch_iterator = tqdm(
-            train_dataloader,
-            desc="Iteration",
-            disable=args.local_rank not in [-1, 0])
+        epoch_iterator = tqdm(train_dataloader, desc="Iteration")
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
@@ -529,16 +523,16 @@ def main():
     if args.no_cuda or torch.cuda.is_available():
         device = torch.device("cpu")
     else:
-        device = torch.device("cuda", args.local_rank)
+        device = torch.device("cuda")
         args.n_gpu = torch.cuda.device_count()
     args.device = device
 
     # Setup logging
-    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                        datefmt = '%m/%d/%Y %H:%M:%S',
-                        level = logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.INFO)
     logger.warning("Device: %s, n_gpu: %s, 16-bits training: %s",
-                   args.local_rank, device, args.n_gpu, args.fp16)
+                   device, args.n_gpu, args.fp16)
 
     # Set seed
     set_seed(args)
@@ -577,9 +571,9 @@ def main():
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+    if args.do_train:
         # Create output directory if needed
-        if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
+        if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
 
         logger.info("Saving model checkpoint to %s", args.output_dir)
