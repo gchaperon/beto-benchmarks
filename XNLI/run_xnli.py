@@ -80,9 +80,9 @@ class XNLIProcessor(DataProcessor):
 
     # RECORDAR IGNORAR LA PRIMERA LINEA !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    def __init__(self, train_language="es", test_language=None, uncased=False):
+    def __init__(self, train_language="es", eval_language=None, uncased=False):
         self.train_language = train_language
-        self.test_language = test_language if test_language else train_language
+        self.test_language = eval_language if eval_language else train_language
         self.uncased = uncased
 
     def get_train_examples(self, data_dir):
@@ -322,10 +322,10 @@ def train(args, train_dataset, model, tokenizer):
                         args.output_dir, 'checkpoint-{}'.format(global_step))
                     if not os.path.exists(output_dir):
                         os.makedirs(output_dir)
-                    model.save_pretrained(output_dir)
-                    torch.save(
-                        args, os.path.join(output_dir, 'training_args.bin'))
                     logger.info("Saving model checkpoint to %s", output_dir)
+                    model_to_save = model.module if hasattr(model, 'module') else model
+                    model_to_save.save_pretrained(output_dir)
+                    torch.save(args, os.path.join(output_dir, 'training_args.bin'))
 
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
@@ -407,15 +407,13 @@ def evaluate(args, model, tokenizer, prefix=""):
 
 
 def load_and_cache_examples(args, task, tokenizer, evaluate=False):
-    processor = XNLIProcessor(cased=args.do_lower_case)
+    processor = XNLIProcessor(uncased=args.do_lower_case)
     output_mode = output_modes[task]
     # Load data features from cache or dataset file
-    cached_features_file = os.path.join(args.data_dir, 'cached_{}_{}_{}_{}_{}'.format(
+    cached_features_file = os.path.join(args.data_dir, 'cached_{}_beto_{}_{}_es'.format(
         'dev' if evaluate else 'train',
-        list(filter(None, args.model_name_or_path.split('/'))).pop(),
         str(args.max_seq_length),
-        str(task),
-        str(args.train_language if (not evaluate and args.train_language is not None) else args.language)))
+        str(task)))
     if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
@@ -548,15 +546,15 @@ def main():
         args.model_dir,
         num_labels=num_labels,
         finetuning_task=args.task_name,
-        cache_dir=args.cache_dir if args.cache_dir else None)
+        )
     tokenizer = BertTokenizer.from_pretrained(
         args.model_dir,
         do_lower_case=args.do_lower_case,
-        cache_dir=args.cache_dir if args.cache_dir else None)
+        )
     model = BertForSequenceClassification.from_pretrained(
         args.model_dir,
         config=config,
-        cache_dir=args.cache_dir if args.cache_dir else None)
+        )
 
     model.to(args.device)
 
