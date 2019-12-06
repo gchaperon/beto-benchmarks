@@ -16,7 +16,6 @@ This script does:
 5. Train it
 6. Evaluate it using the dev data
 
-Author: Gabriel Chaperon
 """
 
 import os
@@ -435,7 +434,7 @@ def main():
     parser.add_argument("--do_train", action='store_true',
                         help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true',
-                        help="Whether to run eval on the test set.")
+                        help="Whether to run eval on the dev/test set.")
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Rul evaluation during training at each logging step.")
     parser.add_argument("--do_lower_case", action='store_true',
