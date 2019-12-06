@@ -47,9 +47,11 @@ from transformers import (
     BertForSequenceClassification,
     BertTokenizer,
     # aparentemente esta funcion es media agnostica a la tarea
-    glue_convert_examples_to_features as convert_examples_to_features,
+    # glue_convert_examples_to_features as convert_examples_to_features,
     get_linear_schedule_with_warmup
 )
+
+from utils import convert_examples_to_features
 
 from tqdm import tqdm, trange
 
@@ -80,19 +82,12 @@ class XNLIProcessor(DataProcessor):
 
     # RECORDAR IGNORAR LA PRIMERA LINEA !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    def __init__(self, train_language="es", test_language=None, uncased=False):
+    def __init__(self, train_language="es", eval_language=None):
         self.train_language = train_language
-        self.test_language = test_language if test_language else train_language
-        self.uncased = uncased
+        self.eval_language = eval_language if eval_language else train_language
 
-    def get_train_examples(self, data_dir):
-        rows = self._read_xnli_tsv(
-            os.path.join(
-                data_dir,
-                "XNLI-MT-1.0",
-                "multinli",
-                f"multinli.train.{self.train_language}.tsv"
-            ))
+    def get_train_examples(self, train_file_path):
+        rows = self._read_xnli_tsv(train_file_path)
         examples = [
             InputExample(
                 guid=f"train-{i}",
@@ -107,34 +102,18 @@ class XNLIProcessor(DataProcessor):
         ]
         return examples
 
-    def get_dev_examples(self, data_dir):
-        return self._get_test_or_dev_helper(data_dir, "dev")
-
-    def get_test_examples(self, data_dir):
-        return self._get_test_or_dev_helper(data_dir, "test")
-
-    def _get_test_or_dev_helper(self, data_dir, stage):
-        if stage == "dev":
-            language = self.dev_language
-        elif stage == "test":
-            language = self.test_language
-
-        rows = self._read_xnli_tsv(
-            os.path.join(
-                data_dir,
-                "XNLI-1.0",
-                f"xnli.{stage}.tsv"
-            ))
+    def get_eval_examples(self, eval_file_path):
+        rows = self._read_xnli_tsv(eval_file_path)
         examples = [
             InputExample(
-                guid=f"{stage}-{i}",
+                guid=f"eval-{i}",
                 text_a=row["sentence1"],
                 text_b=row["sentence2"],
                 label=row["gold_label"]
             )
             for i, row
             in enumerate(rows)
-            if row["language"] == language
+            if row["language"] == self.eval_language
         ]
         return examples
 
@@ -149,18 +128,7 @@ class XNLIProcessor(DataProcessor):
                 quoting=csv.QUOTE_NONE,
                 delimiter="\t"
             )
-            if self.uncased:
-                return [
-                    OrderedDict(
-                        (key, value.lower())
-                        for key, value
-                        in row.items()
-                    )
-                    for row
-                    in reader
-                ]
-            else:
-                return list(reader)
+            return list(reader)
 
     @classmethod
     def get_labels(cls):
@@ -407,24 +375,23 @@ def evaluate(args, model, tokenizer, prefix=""):
 
 
 def load_and_cache_examples(args, task, tokenizer, evaluate=False):
-    processor = XNLIProcessor(cased=args.do_lower_case)
+    processor = XNLIProcessor()
     output_mode = output_modes[task]
     # Load data features from cache or dataset file
-    cached_features_file = os.path.join(args.data_dir, 'cached_{}_{}_{}_{}_{}'.format(
-        'dev' if evaluate else 'train',
-        list(filter(None, args.model_name_or_path.split('/'))).pop(),
+    cached_features_file = os.path.join(args.cache_dir, 'cached_{}_beto_{}_{}_es'.format(
+        os.path.basename(args.eval_file_path if evaluate else args.train_file_path),
         str(args.max_seq_length),
-        str(task),
-        str(args.train_language if (not evaluate and args.train_language is not None) else args.language)))
+        str(task)))
     if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:
-        logger.info("Creating features from dataset file at %s", args.data_dir)
+        logger.info("Creating features from dataset file at %s", args.eval_file_path if evaluate else args.train_file_path)
         label_list = processor.get_labels()
-        examples = processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
+        examples = processor.get_eval_examples(args.eval_file_path) if evaluate else processor.get_train_examples(args.train_file_path)
         features = convert_examples_to_features(examples,
                                                 tokenizer,
+                                                processor,
                                                 label_list=label_list,
                                                 max_length=args.max_seq_length,
                                                 output_mode=output_mode,
@@ -452,10 +419,12 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Required parameters
-    parser.add_argument("--data_dir", default=None, type=str, required=True,
-                        help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
+    parser.add_argument("--train_file_path", default=None, type=str, required=True)
+    parser.add_argument("--eval_file_path", default=None, type=str, required=True)
     parser.add_argument("--model_dir", default=None, type=str, required=True,
                         help="Path to pre-trained model")
+    parser.add_argument("--cache_dir",  default=None, type=str, required=True,
+                        help="Dir where cached stuff goes")
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.")
 
@@ -539,7 +508,7 @@ def main():
 
     # Prepare XNLI task
     args.task_name = 'xnli'
-    processor = XNLIProcessor(uncased=args.do_lower_case)
+    processor = XNLIProcessor()
     args.output_mode = output_modes[args.task_name]
     label_list = processor.get_labels()
     num_labels = len(label_list)
@@ -547,16 +516,13 @@ def main():
     config = BertConfig.from_pretrained(
         args.model_dir,
         num_labels=num_labels,
-        finetuning_task=args.task_name,
-        cache_dir=args.cache_dir if args.cache_dir else None)
+        finetuning_task=args.task_name)
     tokenizer = BertTokenizer.from_pretrained(
         args.model_dir,
-        do_lower_case=args.do_lower_case,
-        cache_dir=args.cache_dir if args.cache_dir else None)
+        do_lower_case=args.do_lower_case)
     model = BertForSequenceClassification.from_pretrained(
         args.model_dir,
-        config=config,
-        cache_dir=args.cache_dir if args.cache_dir else None)
+        config=config)
 
     model.to(args.device)
 

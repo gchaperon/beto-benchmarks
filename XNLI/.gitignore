@@ -1,2 +1,4 @@
 XNLI*
 cached*
+runs/
+__pycache__/
