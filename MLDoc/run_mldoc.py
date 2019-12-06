@@ -70,11 +70,7 @@ class MLDocProcessor(DataProcessor):
             return list(reader)
 
 
-def examples2features(examples,
-                      tokenizer,
-                      label_list,
-                      max_length=128,
-                      ):
+def examples2features(examples, tokenizer, label_list, max_length=128):
     label_map = {label: i for i, label in enumerate(label_list)}
 
     logger.info("Converting examples to features")
@@ -98,7 +94,7 @@ def examples2features(examples,
         attention_mask = [1] * len(input_ids)
 
         # Pad everything
-        pad_token = tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0]
+        pad_token = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
         padding_length = max_length - len(input_ids)
 
         input_ids = input_ids + ([pad_token] * padding_length)
@@ -146,6 +142,7 @@ def main():
     tokenizer = BertTokenizer.from_pretrained("../beto", do_lower_case=True)
     examples = processor.get_train_examples("./data")
     features = examples2features(examples, tokenizer, processor.get_labels())
+    breakpoint()
     # assert all(example.text_b is not None for example in processor.get_train_examples("./data"))
 
 
