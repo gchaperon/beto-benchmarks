@@ -244,12 +244,12 @@ def train(args, dataset, model):
 
             optimizer.zero_grad()
 
-            loss, *_ = model(
+            loss = model(
                 input_ids=batch[0],
                 attention_mask=batch[1],
                 token_type_ids=batch[2],
                 labels=batch[3]
-            )
+            )[0]
             if args.n_gpu > 1:
                 loss = loss.mean()
             loss.backward()
@@ -271,6 +271,43 @@ def train(args, dataset, model):
     return global_step, tr_loss / global_step
 
 
+def evaluate(args, model, dataset):
+
+    dataloader = DataLoader(dataset, batch_size=args.batch_size)
+
+    logger.info("***** Running evaluation *****")
+    logger.info(f"  Num examples = {len(dataset)}")
+    logger.info(f"  Batch size = {args.batch_size}")
+
+    # preds is always on cpu
+    preds = torch.tensor([])
+    gold_labels = torch.tensor([], dtype=torch.long)
+    for batch in tqdm(dataloader, desc="Evaluating"):
+        model.eval()
+        batch = tuple(t.to(args.device) for t in batch)
+        with torch.no_grad():
+            logits = model(
+                input_ids=batch[0],
+                attention_mask=batch[1],
+                token_type_ids=batch[2],
+                # labels=batch[3]
+            )[0]
+            # breakpoint()
+            preds = torch.cat([preds, logits.cpu()])
+            gold_labels = torch.cat([gold_labels, batch[3].cpu()])
+
+    breakpoint()
+    correct = (preds.argmax(dim=1) == gold_labels).sum().item()
+    return {"acc": correct/len(preds)}
+
+
+
+
+
+
+
+
+
 def main(passed_args=None):
     parser = argparse.ArgumentParser()
     # TODO: cambiar defaults!!!!
@@ -290,10 +327,10 @@ def main(passed_args=None):
     parser.add_argument("--warmup", default=0., type=float,
                         help="Percentage of warmup steps. In range [0, 1]")
     parser.add_argument("--do-lower-case", action="store_true")
-    parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--train-size", default=10000, type=int)
+    parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--skip-eval", action="store_true")
     args = parser.parse_args(passed_args)
-
     if (
             os.path.exists(args.output_dir)
             and not args.skip_train
@@ -318,36 +355,71 @@ def main(passed_args=None):
         datefmt='%m/%d/%Y %H:%M:%S',
         level=logging.INFO
     )
+    # ****************** Set the seed *********************
+    set_seed(args)
 
-    processor = MLDocProcessor(n_train=args.train_size)
-    config = BertConfig.from_pretrained(
-        args.model_dir,
-        num_labels=len(processor.get_labels()),
-        finetuning_task="mldoc",
-    )
-    # TODO: recordar cambiar el do_lower_case por el argumento de consola
-    tokenizer = BertTokenizer.from_pretrained(
-        args.model_dir,
-        do_lower_case=True
-    )
-    model = BertForSequenceClassification.from_pretrained(
-        args.model_dir,
-        config=config,
-    ).to(args.device)
-
-    if args.n_gpu > 1:
-        model = torch.nn.DataParallel(model)
 
     # ***************** Train *****************
+    processor = MLDocProcessor(n_train=args.train_size)
     if not args.skip_train:
+        # ****************** Load model ***********************
+        config = BertConfig.from_pretrained(
+            args.model_dir,
+            num_labels=len(processor.get_labels()),
+            finetuning_task="mldoc",
+        )
+        # TODO: recordar cambiar el do_lower_case por el argumento de consola
+        tokenizer = BertTokenizer.from_pretrained(
+            args.model_dir,
+            do_lower_case=True
+        )
+        model = BertForSequenceClassification.from_pretrained(
+            args.model_dir,
+            config=config,
+        ).to(args.device)
+
+        if args.n_gpu > 1:
+            model = torch.nn.DataParallel(model)
         train_dataset = load_dataset(
             args, processor, tokenizer, evaluate=False)
+        # Train
         global_step, tr_loss = train(args, train_dataset, model)
         logger.info(f" global_step = {global_step}, average loss = {tr_loss}")
 
+        # ****************** Save fine-tuned model ************
+        os.makedirs(args.output_dir, exist_ok=args.overwrite_output_dir)
+        logger.info(f"Saving model checkpoint to {args.output_dir}")
+        model_to_save = (
+            model.module
+            if isinstance(model, torch.nn.DataParallel) else
+            model)
+        model_to_save.save_pretrained(args.output_dir)
+        tokenizer.save_pretrained(args.output_dir)
+
+        torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
+
+    # *************** Evaluation *******************
+    if not args.skip_eval:
+        # load saved if training was skipped
+        if args.skip_train:
+            args = torch.load(
+                os.path.join(args.output_dir, "training_args.bin"))
+            model = BertForSequenceClassification.from_pretrained(
+                args.output_dir)
+            # TODO: cambiar do_lower_case
+            tokenizer = BertTokenizer.from_pretrained(
+                args.output_dir, do_lower_case=True)
+            model.to(args.device)
+            if args.n_gpu > 1:
+                model = torch.nn.DataParallel(model)
+
+        eval_dataset = load_dataset(args, processor, tokenizer, evaluate=True)
+        result = evaluate(args, model, eval_dataset)
+        print(result)
+
     # examples = processor.get_train_examples("./data")
     # features = examples2features(examples, tokenizer, processor.get_labels())
-    breakpoint()
+    # breakpoint()
     # assert all(example.text_b is not None for example in processor.get_train_examples("./data"))
 
 
