@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import csv
+import json
 import random
 import logging
 import argparse
@@ -61,7 +62,6 @@ class MLDocProcessor(DataProcessor):
             # the text column was saved as a string with the python syntax
             # for bytes literals, so it must be converted to a string literal
 
-            # breakpoint()
             tokens = tokenizer.tokenize(eval(row[1]).decode())
             example = InputExample(
                 f"test-{i}",
@@ -292,52 +292,53 @@ def evaluate(args, model, dataset):
                 token_type_ids=batch[2],
                 # labels=batch[3]
             )[0]
-            # breakpoint()
             preds = torch.cat([preds, logits.cpu()])
             gold_labels = torch.cat([gold_labels, batch[3].cpu()])
 
-    breakpoint()
     correct = (preds.argmax(dim=1) == gold_labels).sum().item()
     return {"acc": correct/len(preds)}
 
 
-
-
-
-
-
-
-
 def main(passed_args=None):
     parser = argparse.ArgumentParser()
-    # TODO: cambiar defaults!!!!
-    parser.add_argument("--model-dir", default="../beto", type=str)
-    parser.add_argument("--data-dir", default="./data", type=str)
-    parser.add_argument("--output-dir", default="./outputs", type=str)
+
+    # Required
+    parser.add_argument("--model-dir", default=None, type=str, required=True)
+    parser.add_argument("--data-dir", default=None, type=str, required=True)
+    parser.add_argument("--output-dir", default=None, type=str, required=True)
+
+    # Hyperparams to perform search
+    parser.add_argument("--learn-rate", default=5e-5, type=float)
+    parser.add_argument("--batch-size", default=16, type=int)
+    parser.add_argument("--epochs", default=3, type=int)
+
+    # Hyperparams that where relatively common
     parser.add_argument("--max-seq-len", default=128, type=int)
+    parser.add_argument("--weight-decay",  default=0.01, type=float)
+    parser.add_argument("--warmup", default=0.1, type=float,
+                        help="Percentage of warmup steps. In range [0, 1]")
+
+    # Specific params
+    parser.add_argument("--train-size", default=10000, type=int)
+
+    # General options
+    parser.add_argument("--do-lower-case", action="store_true")
     parser.add_argument("--overwrite-cache", action="store_true")
     parser.add_argument("--overwrite-output-dir", action="store_true")
     parser.add_argument("--disable-cuda", action="store_true")
     parser.add_argument("--seed", default=42, type=int)
-    parser.add_argument("--weight-decay",  default=0., type=float)
-    parser.add_argument("--batch-size", default=16, type=int)
-    parser.add_argument("--epochs", default=3, type=int)
-    parser.add_argument("--learn-rate", default=5e-5, type=float)
     parser.add_argument("--logging-steps", default=50, type=int)
-    parser.add_argument("--warmup", default=0., type=float,
-                        help="Percentage of warmup steps. In range [0, 1]")
-    parser.add_argument("--do-lower-case", action="store_true")
-    parser.add_argument("--train-size", default=10000, type=int)
     parser.add_argument("--skip-train", action="store_true")
     parser.add_argument("--skip-eval", action="store_true")
     args = parser.parse_args(passed_args)
     if (
             os.path.exists(args.output_dir)
+            and os.listdir(args.output_dir)  # verifica vacio
             and not args.skip_train
             and not args.overwrite_output_dir
        ):
         raise ValueError(
-            f"Output dir ({args.output_dir}) already exists. "
+            f"Output dir ({args.output_dir}) already exists and is not empty. "
             "Please use --overwrite-output-dir"
         )
 
@@ -358,7 +359,6 @@ def main(passed_args=None):
     # ****************** Set the seed *********************
     set_seed(args)
 
-
     # ***************** Train *****************
     processor = MLDocProcessor(n_train=args.train_size)
     if not args.skip_train:
@@ -368,10 +368,9 @@ def main(passed_args=None):
             num_labels=len(processor.get_labels()),
             finetuning_task="mldoc",
         )
-        # TODO: recordar cambiar el do_lower_case por el argumento de consola
         tokenizer = BertTokenizer.from_pretrained(
             args.model_dir,
-            do_lower_case=True
+            do_lower_case=args.do_lower_case
         )
         model = BertForSequenceClassification.from_pretrained(
             args.model_dir,
@@ -387,7 +386,7 @@ def main(passed_args=None):
         logger.info(f" global_step = {global_step}, average loss = {tr_loss}")
 
         # ****************** Save fine-tuned model ************
-        os.makedirs(args.output_dir, exist_ok=args.overwrite_output_dir)
+        os.makedirs(args.output_dir, exist_ok=True)
         logger.info(f"Saving model checkpoint to {args.output_dir}")
         model_to_save = (
             model.module
@@ -396,31 +395,37 @@ def main(passed_args=None):
         model_to_save.save_pretrained(args.output_dir)
         tokenizer.save_pretrained(args.output_dir)
 
-        torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
+        torch.save(args, os.path.join(args.output_dir, "train_args.bin"))
 
     # *************** Evaluation *******************
     if not args.skip_eval:
         # load saved if training was skipped
         if args.skip_train:
             args = torch.load(
-                os.path.join(args.output_dir, "training_args.bin"))
+                os.path.join(args.output_dir, "train_args.bin"))
             model = BertForSequenceClassification.from_pretrained(
                 args.output_dir)
-            # TODO: cambiar do_lower_case
             tokenizer = BertTokenizer.from_pretrained(
-                args.output_dir, do_lower_case=True)
+                args.output_dir, do_lower_case=args.do_lower_case)
             model.to(args.device)
             if args.n_gpu > 1:
                 model = torch.nn.DataParallel(model)
 
         eval_dataset = load_dataset(args, processor, tokenizer, evaluate=True)
-        result = evaluate(args, model, eval_dataset)
-        print(result)
+        results = evaluate(args, model, eval_dataset)
+        # ********************* Save results ******************
+        logger.info(f"Saving results to {args.output_dir}/results.json")
+        logger.info(f"Training args are saved to {args.output_dir}/"
+                    "train_args.json")
+        if not os.path.exists(args.output_dir):
+            os.makedirs(args.output_dir)
+        with open(os.path.join(args.output_dir, "results.json"), "w") as f:
+            json.dump(results, f)
+        with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
+            json.dump({**vars(args), "device": repr(args.device)}, f)
+        print(results)
 
-    # examples = processor.get_train_examples("./data")
-    # features = examples2features(examples, tokenizer, processor.get_labels())
-    # breakpoint()
-    # assert all(example.text_b is not None for example in processor.get_train_examples("./data"))
+    return results
 
 
 if __name__ == '__main__':

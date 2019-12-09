@@ -1,3 +1,7 @@
 beto/
 
 __pycache__/
+
+data/
+runs/
+outputs/
