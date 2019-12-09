@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import csv
+import sys
 import json
 import random
 import logging
@@ -154,7 +155,7 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
     cache_file = os.path.join(
         args.data_dir,
         "cached_features_beto_mldoc{}_es_{}_{}".format(
-            processor.n_train,
+            "" if evaluate else processor.n_train,
             "dev" if evaluate else "train",
             args.max_seq_len
         ),
@@ -342,6 +343,14 @@ def main(passed_args=None):
             "Please use --overwrite-output-dir"
         )
 
+    # Check this in case someone forgets to add the option
+    if "uncased" in args.model_dir and not args.do_lower_case:
+        option = input(
+            "WARNING: --model-dir contains 'uncased' but got no "
+            "--do-lower-case option.\nDo you want to continue? [Y/n] ")
+        if option == "n":
+            sys.exit(0)
+
     args.device = None
     if not args.disable_cuda and torch.cuda.is_available():
         args.device = torch.device("cuda")
@@ -414,12 +423,12 @@ def main(passed_args=None):
         eval_dataset = load_dataset(args, processor, tokenizer, evaluate=True)
         results = evaluate(args, model, eval_dataset)
         # ********************* Save results ******************
-        logger.info(f"Saving results to {args.output_dir}/results.json")
+        logger.info(f"Saving results to {args.output_dir}/dev_results.json")
         logger.info(f"Training args are saved to {args.output_dir}/"
                     "train_args.json")
         if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
-        with open(os.path.join(args.output_dir, "results.json"), "w") as f:
+        with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
             json.dump(results, f)
         with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
             json.dump({**vars(args), "device": repr(args.device)}, f)
