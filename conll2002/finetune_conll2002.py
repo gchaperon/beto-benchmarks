@@ -1,11 +1,12 @@
 import os
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 import argparse
 import random
 import numpy as np
 import pprint
 from tqdm import tqdm
-from operator import itemgetter
+from operator import itemgetter, attrgetter
 from itertools import zip_longest
 from dataclasses import dataclass
 from typing import List
@@ -68,11 +69,11 @@ class CoNLL2002Processor():
         self.tokenizer = tokenizer
 
     def get_dev_examples(self, data_dir):
-        words, labels = self._read_file(os.join(data_dir, "esp.testa"))
+        words, labels = self._read_file(os.path.join(data_dir, "esp.testa"))
         return self._build_examples(words, labels)
 
     def get_train_examples(self, data_dir):
-        words, labels = self._read_file(os.join(data_dir, "esp.train"))
+        words, labels = self._read_file(os.path.join(data_dir, "esp.train"))
         return self._build_examples(words, labels)
 
     def _build_examples(self, words, labels):
@@ -135,7 +136,6 @@ class CoNLL2002Processor():
             ])
 
 
-
 def examples2features(args, examples, tokenizer):
 
     logger.info("Converting examples to features")
@@ -161,12 +161,55 @@ def examples2features(args, examples, tokenizer):
             -1,  # SEP
         ]
         labels += [-1] * (args.max_seq_len - len(labels))
+
+        # Verify that the length of the padded tokens is correct
         assert len(labels) == args.max_seq_len
+        # Verify there were no overflowing tokens
         assert "overflowing_tokens" not in results
 
         features.append(InputFeature(**results, labels=labels))
 
+    return features
         # breakpoint()
+
+
+def load_dataset(args, processor, tokenizer, evaluate=False):
+    cache_file = os.path.join(
+        args.data_dir,
+        "cached_dataset_beto_{}_conll2002_es_{}_{}".format(
+            "uncased" if args.do_lower_case else "uncased",
+            "dev" if evaluate else "train",
+            args.max_seq_len,
+        )
+    )
+
+    if os.path.exists(cache_file) and not args.overwrite_cache:
+        logger.info(f"Loading dataset from cached file at {cache_file}")
+        dataset = torch.load(cache_file)
+    else:
+        logger.info(f"Creating features from dataset file at {args.data_dir}")
+        # Im just partially sorry for this :D
+        examples = (
+            processor.get_dev_examples
+            if evaluate else
+            processor.get_train_examples
+        )(args.data_dir)
+        features = examples2features(
+            args,
+            examples,
+            tokenizer,
+        )
+        # Im sorry for this :D
+        getter = attrgetter(
+            "input_ids", "attention_mask", "token_type_ids", "labels"
+        )
+        # breakpoint()
+        tensors = map(torch.tensor, zip(*[getter(f) for f in features]))
+        dataset = TensorDataset(*tensors)
+        logger.info(f"Saving dataset into cached file {cache_file}")
+        torch.save(dataset, cache_file)
+
+    return dataset
 
 
 def main(passed_args=None):
@@ -179,6 +222,11 @@ def main(passed_args=None):
 
     # Hyperparams that where relatively common
     parser.add_argument("--max-seq-len", default=128, type=int)
+
+    # General options
+    parser.add_argument("--do-lower-case", action="store_true")
+    parser.add_argument("--overwrite-cache", action="store_true")
+
     args = parser.parse_args(passed_args)
 
     logging.basicConfig(
@@ -194,14 +242,17 @@ def main(passed_args=None):
     )
 
     processor = CoNLL2002Processor(tokenizer, sequence_length=args.max_seq_len)
-    words, labels = processor._read_file("data/esp.testa")
-    examples = processor._build_examples(words, labels)
+    # words, labels = processor._read_file("data/esp.testa")
+    # examples = processor._build_examples(words, labels)
 
-    for example in examples[:5]:
-        print(example)
+    # for example in examples[:5]:
+    #     print(example)
 
-    features = examples2features(args, examples, tokenizer)
-    # breakpoint()
+    # features = examples2features(args, examples, tokenizer)
+
+    dataset = load_dataset(args, processor, tokenizer, evaluate=True)
+
+    breakpoint()
 
 
 if __name__ == '__main__':
