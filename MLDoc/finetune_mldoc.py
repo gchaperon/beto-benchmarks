@@ -138,7 +138,7 @@ def examples2features(examples, tokenizer, label_list, max_length=128):
         logger.info(f"Sentence B: {example.text_b}")
         logger.info(f"input_ids: {feature.input_ids}")
         logger.info(f"attention_mask: {feature.attention_mask}")
-        logger.info(f"token_type_ids: {token_type_ids}")
+        logger.info(f"token_type_ids: {feature.token_type_ids}")
         logger.info(f"label: {example.label} (id = {feature.label})")
 
     return features
@@ -308,7 +308,7 @@ def main(passed_args=None):
     parser.add_argument("--data-dir", default=None, type=str, required=True)
     parser.add_argument("--output-dir", default=None, type=str, required=True)
 
-    # Hyperparams to perform search
+    # Hyperparams to perform search on
     parser.add_argument("--learn-rate", default=5e-5, type=float)
     parser.add_argument("--batch-size", default=16, type=int)
     parser.add_argument("--epochs", default=3, type=int)
