@@ -49,6 +49,19 @@ class InputExample:
     labels_b: List[str]
 
 
+@dataclass
+class InputFeature:
+    input_ids: List[int]
+    attention_mask: List[int]
+    token_type_ids: List[int]
+    labels: List[int]
+
+    def __post_init__(self):
+        # print("Post init!!")
+        # breakpoint()
+        assert len(set(map(len, vars(self).values()))) == 1
+
+
 class CoNLL2002Processor():
     def __init__(self, tokenizer, sequence_length=128):
         self.sequence_length = sequence_length
@@ -100,7 +113,8 @@ class CoNLL2002Processor():
             for start_a, start_b
             in tqdm(
                 zip(sentence_starts[:-1], sentence_starts[1:]),
-                total=len(sentence_starts)-1
+                total=len(sentence_starts)-1,
+                desc="Example"
             )
         ]
 
@@ -121,9 +135,39 @@ class CoNLL2002Processor():
             ])
 
 
-def examples2features(args, examples):
-    ...
-    
+
+def examples2features(args, examples, tokenizer):
+
+    logger.info("Converting examples to features")
+    features = []
+    for example in tqdm(examples, desc="Feature"):
+        # Each input feature should consist of a list o token ids,
+        # an attention mask, a list of token type ids, and optionally
+        # a label or (in this case) a list of labels
+        results = tokenizer.prepare_for_model(
+            tokenizer.convert_tokens_to_ids(example.tokens_a),
+            tokenizer.convert_tokens_to_ids(example.tokens_a),
+            max_length=args.max_seq_len,
+            pad_to_max_length=True,
+            return_token_type_ids=True,
+            return_attention_mask=True,
+            return_overflowing_tokens=True,
+        )
+        labels = [
+            -1,  # CLS
+            *[LABEL_MAP[label] for label in example.labels_a],
+            -1,  # SEP
+            *[LABEL_MAP[label] for label in example.labels_b],
+            -1,  # SEP
+        ]
+        labels += [-1] * (args.max_seq_len - len(labels))
+        assert len(labels) == args.max_seq_len
+        assert "overflowing_tokens" not in results
+
+        features.append(InputFeature(**results, labels=labels))
+
+        # breakpoint()
+
 
 def main(passed_args=None):
     parser = argparse.ArgumentParser()
@@ -133,6 +177,8 @@ def main(passed_args=None):
     parser.add_argument("--data-dir", default="./data", type=str)
     parser.add_argument("--output-dir", default="./outputs", type=str)
 
+    # Hyperparams that where relatively common
+    parser.add_argument("--max-seq-len", default=128, type=int)
     args = parser.parse_args(passed_args)
 
     logging.basicConfig(
@@ -141,14 +187,21 @@ def main(passed_args=None):
         level=logging.INFO
     )
 
-    tokenizer = BertTokenizer.from_pretrained(args.model_dir)
+    # TODO: reemplazar el do_lower_case
+    tokenizer = BertTokenizer.from_pretrained(
+        args.model_dir,
+        do_lower_case=True
+    )
 
-    processor = CoNLL2002Processor(tokenizer, sequence_length=7)
+    processor = CoNLL2002Processor(tokenizer, sequence_length=args.max_seq_len)
     words, labels = processor._read_file("data/esp.testa")
-    processor._build_examples(words, labels)
+    examples = processor._build_examples(words, labels)
 
+    for example in examples[:5]:
+        print(example)
 
-    breakpoint()
+    features = examples2features(args, examples, tokenizer)
+    # breakpoint()
 
 
 if __name__ == '__main__':
