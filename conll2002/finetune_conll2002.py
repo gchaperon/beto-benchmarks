@@ -3,6 +3,7 @@ import sys
 import random
 import argparse
 import pprint
+import json
 from operator import itemgetter, attrgetter
 from itertools import zip_longest
 from dataclasses import dataclass
@@ -74,13 +75,13 @@ class CoNLL2002Processor():
         self.tokenizer = tokenizer
 
     def get_dev_examples(self, data_dir):
-        words, labels = self._read_file(os.path.join(data_dir, "esp.testa"))
+        words, labels = self.read_file(os.path.join(data_dir, "esp.testa"))
         return self._build_examples(words, labels)
 
     def get_train_examples(self, data_dir):
         # TODO: cambiar al train set real
-        # words, labels = self._read_file(os.path.join(data_dir, "esp.train"))
-        words, labels = self._read_file(os.path.join(data_dir, "esp.testa"))
+        # words, labels = self.read_file(os.path.join(data_dir, "esp.train"))
+        words, labels = self.read_file(os.path.join(data_dir, "esp.testa"))
         return self._build_examples(words, labels)
 
     def _build_examples(self, words, labels):
@@ -133,14 +134,14 @@ class CoNLL2002Processor():
         # breakpoint()
         return examples
 
-    def _read_file(self, file_name):
+    def read_file(self, file_name):
         with open(file_name, "r") as file:
-            return zip(*[
+            return list(zip(*[
                 itemgetter(0, 2)(line.split())
                 for line
                 in file
                 if line != "\n"
-            ])
+            ]))
 
 
 def examples2features(args, examples, tokenizer):
@@ -199,7 +200,7 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
             args.max_seq_len,
         )
     )
-
+    # breakpoint()
     if os.path.exists(cache_file) and not args.overwrite_cache:
         logger.info(f"Loading dataset from cached file at {cache_file}")
         dataset = torch.load(cache_file)
@@ -233,7 +234,7 @@ def train(args, dataset, model):
     tb_writer = SummaryWriter()
 
     # Apparently weight decay should not aply to bias and normalization layers
-    # list of two dicts, one where the 
+    # list of two dicts, one where the
     no_decay = ['bias', 'LayerNorm.weight']
     grouped_parameters = [
         {
@@ -310,6 +311,49 @@ def train(args, dataset, model):
     return global_step, tr_loss / global_step
 
 
+def evaluate(args, model, dataset):
+
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+
+    logger.info("***** Running evaluation *****")
+    logger.info(f"  Num examples = {len(dataset)}")
+    logger.info(f"  Batch size = {args.batch_size}")
+
+    # preds is always on cpu
+    preds = torch.tensor([])
+    gold_labels = torch.tensor([], dtype=torch.long)
+    for idx, batch in enumerate(tqdm(dataloader, desc="Evaluating")):
+        model.eval()
+        batch = tuple(t.to(args.device) for t in batch)
+        with torch.no_grad():
+            scores = model(
+                input_ids=batch[0],
+                attention_mask=batch[1],
+                token_type_ids=batch[2],
+                # labels=batch[3]
+            )[0]
+            labels = batch[3]
+            if idx == 0:
+                # take only first sentence
+                logits = scores[0][:args.max_seq_len//2]
+                # WIP
+                breakpoint()
+                logits = [
+                    logit
+                    for logit, label
+                    in zip(logits, labels[0])
+                    if label != LABEL_MAP[INWORD_PAD_LABEL]
+                ]
+
+                ...
+
+            preds = torch.cat([preds, logits.cpu()])
+            gold_labels = torch.cat([gold_labels, batch[3].cpu()])
+
+    correct = (preds.argmax(dim=1) == gold_labels).sum().item()
+    return {"acc": correct/len(preds)}
+
+
 def main(passed_args=None):
     parser = argparse.ArgumentParser()
 
@@ -369,6 +413,7 @@ def main(passed_args=None):
         datefmt='%m/%d/%Y %H:%M:%S',
         level=logging.INFO
     )
+    # breakpoint()
     # ****************** Set the seed *********************
     set_seed(args)
 
@@ -379,7 +424,8 @@ def main(passed_args=None):
             args.model_dir,
             do_lower_case=args.do_lower_case
         )
-        processor = CoNLL2002Processor(tokenizer, sequence_length=args.max_seq_len)
+        processor = CoNLL2002Processor(
+            tokenizer, sequence_length=args.max_seq_len)
 
         config = BertConfig.from_pretrained(
             args.model_dir,
@@ -411,6 +457,37 @@ def main(passed_args=None):
 
         torch.save(args, os.path.join(args.output_dir, "train_args.bin"))
 
+    if not args.skip_eval:
+        # load saved if training was skipped
+        if args.skip_train:
+            # TODO: cargar solo los args relevantes para entrenamiento
+            # y no las opciones generales
+            args = torch.load(
+                os.path.join(args.output_dir, "train_args.bin"))
+            model = BertForTokenClassification.from_pretrained(
+                args.output_dir)
+            tokenizer = BertTokenizer.from_pretrained(
+                args.output_dir, do_lower_case=args.do_lower_case)
+            model.to(args.device)
+            processor = CoNLL2002Processor(
+                tokenizer, sequence_length=args.max_seq_len)
+
+            if args.n_gpu > 1:
+                model = torch.nn.DataParallel(model)
+
+        eval_dataset = load_dataset(args, processor, tokenizer, evaluate=True)
+        results = evaluate(args, model, eval_dataset)
+        # ********************* Save results ******************
+        logger.info(f"Saving results to {args.output_dir}/dev_results.json")
+        logger.info(f"Training args are saved to {args.output_dir}/"
+                    "train_args.json")
+        if not os.path.exists(args.output_dir):
+            os.makedirs(args.output_dir)
+        with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
+            json.dump(results, f)
+        with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
+            json.dump({**vars(args), "device": repr(args.device)}, f)
+        print(results)
 
     breakpoint()
 
