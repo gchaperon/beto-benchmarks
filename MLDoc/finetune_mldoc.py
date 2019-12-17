@@ -154,7 +154,8 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
 
     cache_file = os.path.join(
         args.data_dir,
-        "cached_features_beto_mldoc{}_es_{}_{}".format(
+        "cached_features_beto_{}_mldoc{}_es_{}_{}".format(
+            "uncased" if args.do_lower_case else "uncased",
             "" if evaluate else processor.n_train,
             "dev" if evaluate else "train",
             args.max_seq_len

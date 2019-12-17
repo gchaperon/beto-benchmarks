@@ -1,9 +1,14 @@
+"""
+Using the so-called "sliding window" approach
+"""
 import os
 import sys
 import random
 import argparse
 import pprint
 import json
+from platform import node
+from datetime import datetime
 from operator import itemgetter, attrgetter
 from itertools import zip_longest
 from dataclasses import dataclass
@@ -11,6 +16,7 @@ from typing import List
 
 import numpy as np
 from tqdm import tqdm
+from sklearn.metrics import f1_score
 
 import torch
 from torch.optim import Adam
@@ -34,6 +40,9 @@ LABEL_LIST = ('B-PER', 'B-MISC', 'I-ORG', 'B-ORG',
 LABEL_MAP = {label: i for i, label in enumerate(LABEL_LIST)}
 INWORD_PAD_LABEL = "PAD"
 LABEL_MAP[INWORD_PAD_LABEL] = -100  # adds a value for the added PAD label
+
+TRAIN_FILE = "esp.train"
+DEV_FILE = "esp.testa"
 
 
 def set_seed(args):
@@ -75,16 +84,15 @@ class CoNLL2002Processor():
         self.tokenizer = tokenizer
 
     def get_dev_examples(self, data_dir):
-        words, labels = self.read_file(os.path.join(data_dir, "esp.testa"))
-        return self._build_examples(words, labels)
+        words, labels = self.read_file(os.path.join(data_dir, DEV_FILE))
+        return self.build_examples(words, labels)
 
     def get_train_examples(self, data_dir):
         # TODO: cambiar al train set real
-        # words, labels = self.read_file(os.path.join(data_dir, "esp.train"))
-        words, labels = self.read_file(os.path.join(data_dir, "esp.testa"))
-        return self._build_examples(words, labels)
+        words, labels = self.read_file(os.path.join(data_dir, TRAIN_FILE))
+        return self.build_examples(words, labels)
 
-    def _build_examples(self, words, labels):
+    def build_examples(self, words, labels):
         """
         Build examples using the sliding window aproach
         Instead of converting the labels directly to their corresponding
@@ -134,6 +142,7 @@ class CoNLL2002Processor():
         # breakpoint()
         return examples
 
+    @classmethod
     def read_file(self, file_name):
         with open(file_name, "r") as file:
             return list(zip(*[
@@ -195,7 +204,7 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
     cache_file = os.path.join(
         args.data_dir,
         "cached_dataset_beto_{}_conll2002_es_{}_{}".format(
-            "uncased" if args.do_lower_case else "uncased",
+            "uncased" if args.do_lower_case else "cased",
             "dev" if evaluate else "train",
             args.max_seq_len,
         )
@@ -231,7 +240,12 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
 
 
 def train(args, dataset, model):
-    tb_writer = SummaryWriter()
+    tb_writer = SummaryWriter(
+        log_dir="runs/conll2002_{}_{}".format(
+            datetime.now().strftime('%b%d_%H-%M'),
+            node()
+        )
+    )
 
     # Apparently weight decay should not aply to bias and normalization layers
     # list of two dicts, one where the
@@ -311,17 +325,16 @@ def train(args, dataset, model):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, dataset):
+def evaluate(args, model, dataset, processor):
 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
     logger.info("***** Running evaluation *****")
     logger.info(f"  Num examples = {len(dataset)}")
     logger.info(f"  Batch size = {args.batch_size}")
-
+    # breakpoint()
     # preds is always on cpu
     preds = torch.tensor([])
-    gold_labels = torch.tensor([], dtype=torch.long)
     for idx, batch in enumerate(tqdm(dataloader, desc="Evaluating")):
         model.eval()
         batch = tuple(t.to(args.device) for t in batch)
@@ -333,30 +346,48 @@ def evaluate(args, model, dataset):
                 # labels=batch[3]
             )[0]
             labels = batch[3]
+            # breakpoint()
             if idx == 0:
-                # take only first sentence
-                logits = scores[0][:args.max_seq_len//2]
-                # WIP
-                breakpoint()
-                logits = [
-                    logit
-                    for logit, label
-                    in zip(logits, labels[0])
-                    if label != LABEL_MAP[INWORD_PAD_LABEL]
-                ]
+                # Only for the first example add the first sentence
+                half_len = args.max_seq_len // 2
+                positions = labels[0, :half_len] != LABEL_MAP[INWORD_PAD_LABEL]
+                preds = torch.cat([
+                    preds,
+                    scores[0, :half_len][positions].cpu()
+                ])
+                # breakpoint()
+            # For every example add the second sentence
+            half_len = args.max_seq_len // 2
+            positions = labels[:, half_len:] != LABEL_MAP[INWORD_PAD_LABEL]
+            preds = torch.cat([
+                preds,
+                scores[:, half_len:][positions].cpu()
+            ])
 
-                ...
+    # Read the gold labels directly from file to verify dimensions are ok
+    # breakpoint()
+    gold_labels = [
+        LABEL_MAP[label]
+        for label
+        in processor.read_file(os.path.join(args.data_dir, DEV_FILE))[1]
+    ]
+    # breakpoint()
+    assert len(preds) == len(gold_labels)
 
-            preds = torch.cat([preds, logits.cpu()])
-            gold_labels = torch.cat([gold_labels, batch[3].cpu()])
-
-    correct = (preds.argmax(dim=1) == gold_labels).sum().item()
-    return {"acc": correct/len(preds)}
+    score = f1_score(
+        gold_labels,
+        preds.argmax(dim=1),
+        labels=[LABEL_MAP[label] for label in LABEL_LIST if label != "O"],
+        average="micro",
+    )
+    # breakpoint()
+    return {"f1_score": score}
 
 
 def main(passed_args=None):
     parser = argparse.ArgumentParser()
 
+    # TODO: add required
     # Required
     parser.add_argument("--model-dir", default="../beto-uncased", type=str)
     parser.add_argument("--data-dir", default="./data", type=str)
@@ -476,7 +507,7 @@ def main(passed_args=None):
                 model = torch.nn.DataParallel(model)
 
         eval_dataset = load_dataset(args, processor, tokenizer, evaluate=True)
-        results = evaluate(args, model, eval_dataset)
+        results = evaluate(args, model, eval_dataset, processor)
         # ********************* Save results ******************
         logger.info(f"Saving results to {args.output_dir}/dev_results.json")
         logger.info(f"Training args are saved to {args.output_dir}/"
@@ -489,7 +520,7 @@ def main(passed_args=None):
             json.dump({**vars(args), "device": repr(args.device)}, f)
         print(results)
 
-    breakpoint()
+    # breakpoint()
 
 
 if __name__ == '__main__':

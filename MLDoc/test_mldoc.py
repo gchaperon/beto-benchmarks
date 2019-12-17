@@ -122,7 +122,10 @@ def examples2features(examples, tokenizer, label_list, max_length=128):
 def load_dataset(args, processor, tokenizer):
     cache_file = os.path.join(
         args.data_dir,
-        "cached_features_beto_mldoc_es_test_{}".format(args.max_seq_len),
+        "cached_features_beto_{}_mldoc_es_test_{}".format(
+            "uncased" if args.do_lower_case else "cased",
+            args.max_seq_len,
+        ),
     )
 
     if os.path.exists(cache_file) and not args.overwrite_cache:
@@ -219,6 +222,7 @@ def main(passed_args=None):
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
+    breakpoint()
     # ************* Eval *************
     processor = MLDocProcessorTest()
     test_dataset = load_dataset(args, processor, tokenizer)
@@ -227,7 +231,7 @@ def main(passed_args=None):
     logger.info(f"Saving results to {args.output_dir}/test_results.json")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
+    with open(os.path.join(args.output_dir, "test_results.json"), "w") as f:
         json.dump(results, f)
     print(results)
 
