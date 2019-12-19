@@ -295,7 +295,7 @@ def train(args, dataset, model):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
 
-            optimizer.zero_grad()
+            model.zero_grad()
 
             loss = model(
                 input_ids=batch[0],
@@ -357,6 +357,7 @@ def evaluate(args, model, dataset, processor):
                 ])
                 # breakpoint()
             # For every example add the second sentence
+            breakpoint()
             half_len = args.max_seq_len // 2
             positions = labels[:, half_len:] != LABEL_MAP[INWORD_PAD_LABEL]
             preds = torch.cat([

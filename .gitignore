@@ -1,6 +1,8 @@
 beto/
 beto-uncased/
 __pycache__/
+.ipynb_checkpoints
+
 
 data/
 runs/
