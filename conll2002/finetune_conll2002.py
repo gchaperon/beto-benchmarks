@@ -214,7 +214,7 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
         logger.info(f"Loading dataset from cached file at {cache_file}")
         dataset = torch.load(cache_file)
     else:
-        logger.info(f"Creating features from dataset file at {args.data_dir}")
+        logger.info(f"Creating features from dataset files at {args.data_dir}")
         # Im just partially sorry for this :D
         examples = (
             processor.get_dev_examples
@@ -235,7 +235,7 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
         dataset = TensorDataset(*tensors)
         logger.info(f"Saving dataset into cached file {cache_file}")
         torch.save(dataset, cache_file)
-
+    breakpoint()
     return dataset
 
 
@@ -473,6 +473,8 @@ def main(passed_args=None):
             model = torch.nn.DataParallel(model)
         train_dataset = load_dataset(
             args, processor, tokenizer, evaluate=False)
+
+        breakpoint()
         # Train
         global_step, tr_loss = train(args, train_dataset, model)
         logger.info(f" global_step = {global_step}, average loss = {tr_loss}")
