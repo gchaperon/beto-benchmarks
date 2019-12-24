@@ -233,6 +233,7 @@ def train(args, dataset, model):
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(dataset)}")
+    logger.info(f"  Learn rate = {args.learn_rate}")
     logger.info(f"  Num Epochs = {args.epochs}")
     logger.info(f"  Train batch size = {args.batch_size}")
     logger.info(f"  Total optimization steps = {total_steps}")
