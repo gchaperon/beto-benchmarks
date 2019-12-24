@@ -1,0 +1,48 @@
+Experiment 1
+	"learn_rate": 2e-05, "batch_size": 16, "epochs": 3
+	{'acc': 0.962}
+
+Experiment 2
+	"learn_rate": 2e-05, "batch_size": 16, "epochs": 4
+	{'acc': 0.963}
+
+Experiment 3
+	"learn_rate": 2e-05, "batch_size": 32, "epochs": 3
+	{'acc': 0.967}
+
+Experiment 4
+	"learn_rate": 2e-05, "batch_size": 32, "epochs": 4
+	{'acc': 0.968}
+
+Experiment 5
+	"learn_rate": 3e-05, "batch_size": 16, "epochs": 3
+	{'acc': 0.962}
+
+Experiment 6
+	"learn_rate": 3e-05, "batch_size": 16, "epochs": 4
+	{'acc': 0.955}
+
+Experiment 7
+	"learn_rate": 3e-05, "batch_size": 32, "epochs": 3
+	{'acc': 0.968}
+
+Experiment 8
+	"learn_rate": 3e-05, "batch_size": 32, "epochs": 4
+	{'acc': 0.967}
+
+Experiment 9
+	"learn_rate": 5e-05, "batch_size": 16, "epochs": 3
+	{'acc': 0.954}
+
+Experiment 10
+	"learn_rate": 5e-05, "batch_size": 16, "epochs": 4
+	{'acc': 0.942}
+
+Experiment 11
+	"learn_rate": 5e-05, "batch_size": 32, "epochs": 3
+	{'acc': 0.959}
+
+Experiment 12
+	"learn_rate": 5e-05, "batch_size": 32, "epochs": 4
+	{'acc': 0.963}
+
