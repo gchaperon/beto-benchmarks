@@ -1,0 +1,48 @@
+Experiment 1
+	lr=2e-05, batch=16, epochs=3
+	{'acc': 0.966}
+
+Experiment 2
+	lr=2e-05, batch=16, epochs=4
+	{'acc': 0.965}
+
+Experiment 3
+	lr=2e-05, batch=32, epochs=3
+	{'acc': 0.961}
+
+Experiment 4
+	lr=2e-05, batch=32, epochs=4
+	{'acc': 0.96}
+
+Experiment 5
+	lr=3e-05, batch=16, epochs=3
+	{'acc': 0.962}
+
+Experiment 6
+	lr=3e-05, batch=16, epochs=4
+	{'acc': 0.955}
+
+Experiment 7
+	lr=3e-05, batch=32, epochs=3
+	{'acc': 0.96}
+
+Experiment 8
+	lr=3e-05, batch=32, epochs=4
+	{'acc': 0.954}
+
+Experiment 9
+	lr=5e-05, batch=16, epochs=3
+	{'acc': 0.948}
+
+Experiment 10
+	lr=5e-05, batch=16, epochs=4
+	{'acc': 0.941}
+
+Experiment 11
+	lr=5e-05, batch=32, epochs=3
+	{'acc': 0.96}
+
+Experiment 12
+	lr=5e-05, batch=32, epochs=4
+	{'acc': 0.955}
+

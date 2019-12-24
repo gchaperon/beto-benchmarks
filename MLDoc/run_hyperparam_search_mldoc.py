@@ -58,6 +58,7 @@ def main():
             experiment_args = list(map(str,experiment_args))
             results = finetune_mldoc.main(experiment_args)
             out_f.write(f"Experiment {i + 1}\n")
+            out_f.write(f"\tlr={learn_rate}, batch={batch_size}, epochs={epochs}\n")
             out_f.write(f"\t{results}\n\n")
 
 
