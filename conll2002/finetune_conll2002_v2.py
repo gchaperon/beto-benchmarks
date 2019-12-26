@@ -5,6 +5,7 @@ sentence, maybe that is the problem with the other script
 
 import torch
 import torch.nn as nn
+from torch.utils.data import TensorDataset
 
 from itertools import zip_longest
 from dataclasses import dataclass
@@ -74,10 +75,11 @@ def load_examples(args, eval_=True):
         for group
         in groups
     ]
+    logger.info("Done")
     return examples
 
 
-def examples2features(args, examples, tokenizer):
+def examples2features(examples, tokenizer, max_length):
     """
     Each sentence will be converted to an InputFeature and truncated if
     it is to long.
@@ -98,7 +100,7 @@ def examples2features(args, examples, tokenizer):
 
         outputs = tokenizer.prepare_for_model(
             ids=tokenizer.convert_tokens_to_ids(tokens),
-            max_length=args.max_length,
+            max_length=max_length,
             pad_to_max_length=True,
             return_overflowing_tokens=True,
         )
@@ -107,10 +109,10 @@ def examples2features(args, examples, tokenizer):
             n_overflowing_examples += 1
 
         # pad labels
-        if len(labels) < args.max_length:
-            labels += [IGNORE_INDEX] * (args.max_length - len(labels))
+        if len(labels) < max_length:
+            labels += [IGNORE_INDEX] * (max_length - len(labels))
         else:
-            labels = labels[:args.max_length]
+            labels = labels[:max_length]
 
         feature = InputFeature(
             *itemgetter(
@@ -119,15 +121,40 @@ def examples2features(args, examples, tokenizer):
                 "token_type_ids"
             )(outputs),
             labels,
-            args.max_length,
+            max_length,
         )
         # breakpoint()
 
         features.append(feature)
 
-    
+    logger.info(f"Number of truncated examples: {n_overflowing_examples}")
     breakpoint()
     return features
+
+
+def load_dataset(args, tokenizer, eval_=False):
+    """
+    Some day i will implement the logic for saving to a cache file
+    and loading from it
+    """
+    examples = load_examples(args, eval_=eval_)
+
+    # This is to prevent some examples lacking predictions if they are
+    # to long.
+    # I belive there are no examples in the evaluation sets
+    # that after tokenization are longer than 512
+    if eval_:
+        max_length = 512 if args.max_length < 512 else args.max_length
+    else:
+        max_length = args.max_length
+
+    features = examples2features(examples, tokenizer, max_length)
+
+    dataset = 
+
+
+
+
 
 
 def main(passed_args=None):
