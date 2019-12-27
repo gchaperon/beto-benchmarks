@@ -294,15 +294,16 @@ def evaluate(args, model, dataset, gold_labels):
 
         labels = batch[3]
         batch = [t.to(args.device) for t in batch[:3]]
-        scores = model(
-            input_ids=batch[0],
-            attention_mask=batch[1],
-            token_type_ids=batch[2],
-        )[0]
+        with torch.no_grad():
+            scores = model(
+                input_ids=batch[0],
+                attention_mask=batch[1],
+                token_type_ids=batch[2],
+            )[0]
 
-        positions = labels != IGNORE_INDEX
-        # breakpoint()
-        predictions = torch.cat([predictions, scores.cpu()[positions]])
+            positions = labels != IGNORE_INDEX
+            # breakpoint()
+            predictions = torch.cat([predictions, scores.cpu()[positions]])
 
     assert len(predictions) == len(gold_labels), \
         f"{len(predictions)} != {len(gold_labels)}"
@@ -314,7 +315,8 @@ def evaluate(args, model, dataset, gold_labels):
             LABEL_MAP[label]
             for label in LABEL_LIST
             if label != IGNORE_INDEX
-        ]
+        ],
+        average="micro",
     )
     return {"f1_score": score}
 
@@ -328,7 +330,7 @@ def main(passed_args=None):
 
     parser.add_argument("--learn-rate", default=3e-5, type=float)
     parser.add_argument("--epochs", default=3, type=int)
-    parser.add_argument("--batch-size", default=2, type=int)
+    parser.add_argument("--batch-size", default=4, type=int)
 
     parser.add_argument("--max-length", default=512, type=int)
     parser.add_argument("--weight-decay", default=0.01, type=float)
