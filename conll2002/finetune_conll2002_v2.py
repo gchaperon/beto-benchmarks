@@ -10,6 +10,7 @@ If the max sentence length is to small, some examples will be truncated
 and some labels will be lost
 """
 import argparse
+import json
 import logging
 import os
 import random
@@ -307,18 +308,39 @@ def evaluate(args, model, dataset, gold_labels):
 
     assert len(predictions) == len(gold_labels), \
         f"{len(predictions)} != {len(gold_labels)}"
-    breakpoint()
-    score = f1_score(
-        [LABEL_MAP[label] for label in gold_labels],
+    # breakpoint()
+    result = f1_score(
+        gold_labels,
         predictions.argmax(dim=1),
-        labels=[
-            LABEL_MAP[label]
-            for label in LABEL_LIST
-            if label != IGNORE_INDEX
-        ],
+        labels=[LABEL_MAP[label] for label in LABEL_LIST if label != "O"],
         average="micro",
     )
-    return {"f1_score": score}
+    return {"f1_score": result}
+
+
+def save_model(args, model, tokenizer):
+    os.makedirs(args.output_dir, exist_ok=True)
+    logger.info(f"Saving model checkpoint to {args.output_dir}")
+    model_to_save = (
+        model.module
+        if isinstance(model, torch.nn.DataParallel) else
+        model)
+    model_to_save.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
+
+    torch.save(args, os.path.join(args.output_dir, "train_args.bin"))
+
+
+def save_results(args, results):
+    logger.info(f"Saving results to {args.output_dir}/dev_results.json")
+    logger.info(f"Training args are saved to {args.output_dir}/"
+                "train_args.json")
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
+        json.dump(results, f)
+    with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
+        json.dump({**vars(args), "device": repr(args.device)}, f)
 
 
 def main(passed_args=None):
@@ -327,10 +349,11 @@ def main(passed_args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", default="../beto-cased", type=str)
     parser.add_argument("--data-dir", default="./data", type=str)
+    parser.add_argument("--output-dir", default="./outputs", type=str)
 
     parser.add_argument("--learn-rate", default=3e-5, type=float)
     parser.add_argument("--epochs", default=3, type=int)
-    parser.add_argument("--batch-size", default=4, type=int)
+    parser.add_argument("--batch-size", default=8, type=int)
 
     parser.add_argument("--max-length", default=512, type=int)
     parser.add_argument("--weight-decay", default=0.01, type=float)
@@ -338,13 +361,26 @@ def main(passed_args=None):
 
     parser.add_argument("--disable-cuda", action="store_true")
     parser.add_argument("--do-lower-case", action="store_true")
+    parser.add_argument("--overwrite-output-dir", action="store_true")
     parser.add_argument("--remove-accents", action="store_false",
                         dest="keep_accents")
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--logging-steps", default=50, type=int)
 
-    args = parser.parse_args()
+    args = parser.parse_args(passed_args)
 
+    # *** Check output dir is ok ***
+    if (
+        os.path.exists(args.output_dir)
+        and os.listdir(args.output_dir)  # check empty
+        and not args.overwrite_output_dir
+    ):
+        raise ValueError(
+            f"Output dir ({args.output_dir}) already exists and is not empty. "
+            "Please use --overwrite-output-dir"
+        )
+
+    # *** Finish setting up the args ***
     # In case i forgot to add the flag
     if "uncased" in args.model_dir and not args.do_lower_case:
         option = input(
@@ -352,13 +388,6 @@ def main(passed_args=None):
             "--do-lower-case option.\nDo you want to continue? [Y/n] ")
         if option == "n":
             sys.exit(0)
-
-    logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-        datefmt='%m/%d/%Y %H:%M:%S',
-        level=logging.INFO
-    )
-
     if not args.disable_cuda and torch.cuda.is_available():
         args.device = torch.device("cuda")
         args.n_gpu = torch.cuda.device_count()
@@ -366,6 +395,16 @@ def main(passed_args=None):
         args.device = torch.device("cpu")
         args.n_gpu = 0
 
+    # *** Set up logging ***
+    logging.basicConfig(
+        format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+        datefmt='%m/%d/%Y %H:%M:%S',
+        level=logging.INFO
+    )
+
+    # *** Load model ***
+    # im working with the fork from https://github.com/josecannete
+    # so keep_accents makes sense
     tokenizer = BertTokenizer.from_pretrained(
         args.model_dir,
         do_lower_case=args.do_lower_case,
@@ -383,22 +422,27 @@ def main(passed_args=None):
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-    # Train !
-    # train_dataset = load_dataset(args, tokenizer, eval_=False)
+    # breakpoint()
+    # *** Set the seed ***
+    set_seed(args)
 
-    # global_step, tr_loss = train(args, model, train_dataset)
+    # *** Train ! ***
+    train_dataset = load_dataset(args, tokenizer, eval_=False)
+    gold_labelsal_step, tr_loss = train(args, model, train_dataset)
+    # Save the finetuned model
+    save_model(args, model, tokenizer)
 
-    # Evaluate !
+    # *** Evaluate ! ***
     # Get the gold labesl from the original file
-
     gold_labels = [
-        line.split()[2]
+        LABEL_MAP[line.split()[2]]
         for line in open(os.path.join(args.data_dir, "esp.testa"))
         if line != "\n"
     ]
     eval_dataset = load_dataset(args, tokenizer, eval_=True)
-    score = evaluate(args, model, eval_dataset, gold_labels)
-    print(score)
+    results = evaluate(args, model, eval_dataset, gold_labels)
+    save_results(args, results)
+    print(results)
 
 
 

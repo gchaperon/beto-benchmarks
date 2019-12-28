@@ -264,7 +264,8 @@ def train(args, dataset, model):
             if (args.logging_steps > 0
                     and global_step % args.logging_steps == 0):
                 tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
-                tb_writer.add_scalar("loss", running_loss/args.logging_steps, global_step)
+                tb_writer.add_scalar(
+                    "loss", running_loss/args.logging_steps, global_step)
                 running_loss = 0.
 
             global_step += 1

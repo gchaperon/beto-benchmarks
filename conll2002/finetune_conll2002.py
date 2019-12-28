@@ -357,7 +357,7 @@ def evaluate(args, model, dataset, processor):
                 ])
                 # breakpoint()
             # For every example add the second sentence
-            breakpoint()
+            # breakpoint()
             half_len = args.max_seq_len // 2
             positions = labels[:, half_len:] != LABEL_MAP[INWORD_PAD_LABEL]
             preds = torch.cat([
@@ -372,7 +372,7 @@ def evaluate(args, model, dataset, processor):
         for label
         in processor.read_file(os.path.join(args.data_dir, DEV_FILE))[1]
     ]
-    # breakpoint()
+    breakpoint()
     assert len(preds) == len(gold_labels)
 
     score = f1_score(
@@ -383,6 +383,55 @@ def evaluate(args, model, dataset, processor):
     )
     # breakpoint()
     return {"f1_score": score}
+
+
+def save_model(args, model, tokenizer):
+    os.makedirs(args.output_dir, exist_ok=True)
+    logger.info(f"Saving model checkpoint to {args.output_dir}")
+    model_to_save = (
+        model.module
+        if isinstance(model, torch.nn.DataParallel) else
+        model)
+    model_to_save.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
+
+    torch.save(args, os.path.join(args.output_dir, "train_args.bin"))
+
+
+def load_finetuned(args):
+    # TODO: cargar solo los args relevantes para entrenamiento
+    # y no las opciones generales
+    old_args = torch.load(
+        os.path.join(args.output_dir, "train_args.bin"))
+    model = BertForTokenClassification.from_pretrained(
+        args.output_dir)
+    tokenizer = BertTokenizer.from_pretrained(
+        args.output_dir, do_lower_case=args.do_lower_case)
+    model.to(args.device)
+    processor = CoNLL2002Processor(
+        tokenizer, sequence_length=args.max_seq_len)
+
+    # TODO:
+    # The number of gpus for the current machine might be different
+    # from the number at finetuning
+    old_args.n_gpu = args.n_gpu
+
+    if args.n_gpu > 1:
+        model = torch.nn.DataParallel(model)
+
+    return old_args, model, tokenizer, processor
+
+
+def save_results(args, results):
+    logger.info(f"Saving results to {args.output_dir}/dev_results.json")
+    logger.info(f"Training args are saved to {args.output_dir}/"
+                "train_args.json")
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
+        json.dump(results, f)
+    with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
+        json.dump({**vars(args), "device": repr(args.device)}, f)
 
 
 def main(passed_args=None):
@@ -449,78 +498,47 @@ def main(passed_args=None):
     # ****************** Set the seed *********************
     set_seed(args)
 
+    # ****************** Load model ***********************
+    tokenizer = BertTokenizer.from_pretrained(
+        args.model_dir,
+        do_lower_case=args.do_lower_case
+    )
+    processor = CoNLL2002Processor(
+        tokenizer, sequence_length=args.max_seq_len)
+
+    config = BertConfig.from_pretrained(
+        args.model_dir,
+        num_labels=len(LABEL_LIST),
+        finetuning_task="conll2002",
+    )
+    model = BertForTokenClassification.from_pretrained(
+        args.model_dir,
+        config=config,
+    ).to(args.device)
+
+    if args.n_gpu > 1:
+        model = torch.nn.DataParallel(model)
+    train_dataset = load_dataset(
+        args, processor, tokenizer, evaluate=False)
+
     if not args.skip_train:
-        # ****************** Load model ***********************
-
-        tokenizer = BertTokenizer.from_pretrained(
-            args.model_dir,
-            do_lower_case=args.do_lower_case
-        )
-        processor = CoNLL2002Processor(
-            tokenizer, sequence_length=args.max_seq_len)
-
-        config = BertConfig.from_pretrained(
-            args.model_dir,
-            num_labels=len(LABEL_LIST),
-            finetuning_task="conll2002",
-        )
-        model = BertForTokenClassification.from_pretrained(
-            args.model_dir,
-            config=config,
-        ).to(args.device)
-
-        if args.n_gpu > 1:
-            model = torch.nn.DataParallel(model)
-        train_dataset = load_dataset(
-            args, processor, tokenizer, evaluate=False)
-
         breakpoint()
         # Train
         global_step, tr_loss = train(args, train_dataset, model)
         logger.info(f" global_step = {global_step}, average loss = {tr_loss}")
 
         # ****************** Save fine-tuned model ************
-        os.makedirs(args.output_dir, exist_ok=True)
-        logger.info(f"Saving model checkpoint to {args.output_dir}")
-        model_to_save = (
-            model.module
-            if isinstance(model, torch.nn.DataParallel) else
-            model)
-        model_to_save.save_pretrained(args.output_dir)
-        tokenizer.save_pretrained(args.output_dir)
-
-        torch.save(args, os.path.join(args.output_dir, "train_args.bin"))
+        save_model(args, model, tokenizer)
 
     if not args.skip_eval:
         # load saved if training was skipped
         if args.skip_train:
-            # TODO: cargar solo los args relevantes para entrenamiento
-            # y no las opciones generales
-            args = torch.load(
-                os.path.join(args.output_dir, "train_args.bin"))
-            model = BertForTokenClassification.from_pretrained(
-                args.output_dir)
-            tokenizer = BertTokenizer.from_pretrained(
-                args.output_dir, do_lower_case=args.do_lower_case)
-            model.to(args.device)
-            processor = CoNLL2002Processor(
-                tokenizer, sequence_length=args.max_seq_len)
-
-            if args.n_gpu > 1:
-                model = torch.nn.DataParallel(model)
+            args, model, tokenizer, processor = load_finetuned(args)
 
         eval_dataset = load_dataset(args, processor, tokenizer, evaluate=True)
         results = evaluate(args, model, eval_dataset, processor)
         # ********************* Save results ******************
-        logger.info(f"Saving results to {args.output_dir}/dev_results.json")
-        logger.info(f"Training args are saved to {args.output_dir}/"
-                    "train_args.json")
-        if not os.path.exists(args.output_dir):
-            os.makedirs(args.output_dir)
-        with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
-            json.dump(results, f)
-        with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
-            json.dump({**vars(args), "device": repr(args.device)}, f)
+        save_results(args, results)
         print(results)
 
     # breakpoint()
