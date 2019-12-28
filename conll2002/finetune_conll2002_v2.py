@@ -442,7 +442,8 @@ def main(passed_args=None):
     eval_dataset = load_dataset(args, tokenizer, eval_=True)
     results = evaluate(args, model, eval_dataset, gold_labels)
     save_results(args, results)
-    print(results)
+    logger.info(f"Results: {results}")
+    return results
 
 
 

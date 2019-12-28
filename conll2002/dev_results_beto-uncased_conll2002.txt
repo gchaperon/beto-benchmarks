@@ -1,0 +1,48 @@
+Experiment 1
+	lr=2e-05, batch=8, epochs=1
+	{"f1_score": 0.7933626820182865}
+
+Experiment 2
+	lr=2e-05, batch=8, epochs=2
+	{"f1_score": 0.7753274525527933}
+
+Experiment 3
+	lr=2e-05, batch=8, epochs=3
+	{"f1_score": 0.7513498920086393}
+
+Experiment 4
+	lr=2e-05, batch=8, epochs=4
+	{"f1_score": 0.7210791660989235}
+
+Experiment 5
+	lr=3e-05, batch=8, epochs=1
+	{"f1_score": 0.7890056588520614}
+
+Experiment 6
+	lr=3e-05, batch=8, epochs=2
+	{"f1_score": 0.7414313501911597}
+
+Experiment 7
+	lr=3e-05, batch=8, epochs=3
+	{"f1_score": 0.7020864999309107}
+
+Experiment 8
+	lr=3e-05, batch=8, epochs=4
+	{"f1_score": 0.6703111858704794}
+
+Experiment 9
+	lr=5e-05, batch=8, epochs=1
+	{"f1_score": 0.7581602373887241}
+
+Experiment 10
+	lr=5e-05, batch=8, epochs=2
+	{"f1_score": 0.685545803620406}
+
+Experiment 11
+	lr=5e-05, batch=8, epochs=3
+	{"f1_score": 0.6356566610945563}
+
+Experiment 12
+	lr=5e-05, batch=8, epochs=4
+	{"f1_score": 0.6070588235294117}
+
