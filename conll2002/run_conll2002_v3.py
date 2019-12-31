@@ -376,7 +376,7 @@ def train_main(args):
     dev_dataset = load_dataset(args, tokenizer, "dev")
     results = evaluate(args, model, dev_dataset, gold_labels)
     save_results(args, results, "dev")
-    logger.info(f"Results: {results}")
+    logger.info(f"Dev results: {results}")
     return results
 
 
@@ -386,7 +386,7 @@ def test_main(args):
     gold_labels = get_gold_labels(args, "test")
     results = evaluate(args, model, test_dataset, gold_labels)
     save_results(args, results, "test")
-    logger.info(f"Results: {results}")
+    logger.info(f"Test results: {results}")
     return results
 
 
@@ -433,7 +433,7 @@ def main(passed_args=None):
     parser_train.set_defaults(func=train_main)
     parser_test.set_defaults(func=test_main)
 
-    args = parser.parse_args()
+    args = parser.parse_args(passed_args)
 
     # *** Finish setting up the args ***
     # In case i forgot to add the flag
