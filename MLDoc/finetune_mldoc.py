@@ -41,17 +41,13 @@ class MLDocProcessor(DataProcessor):
         self.n_train = n_train
 
     def get_train_examples(self, data_dir):
-        rows = self._read_tsv(os.path.join(
-            data_dir,
-            f"mldoc.es.train.{self.n_train}"
-        ))
+        rows = self._read_tsv(
+            os.path.join(data_dir, f"mldoc.es.train.{self.n_train}")
+        )
         return self._rows2examples(rows)
 
     def get_dev_examples(self, data_dir):
-        rows = self._read_tsv(os.path.join(
-            data_dir,
-            f"mldoc.es.dev"
-        ))
+        rows = self._read_tsv(os.path.join(data_dir, f"mldoc.es.dev"))
         return self._rows2examples(rows)
 
     def _rows2examples(self, rows):
@@ -68,7 +64,7 @@ class MLDocProcessor(DataProcessor):
                 f"test-{i}",
                 tokens[0],
                 tokens[1] if len(tokens) > 1 else None,
-                label=row[0]
+                label=row[0],
             )
             examples.append(example)
 
@@ -79,11 +75,7 @@ class MLDocProcessor(DataProcessor):
 
     def _read_tsv(self, fpath):
         with open(fpath, "r") as file:
-            reader = csv.reader(
-                file,
-                quoting=csv.QUOTE_NONE,
-                delimiter="\t"
-            )
+            reader = csv.reader(file, quoting=csv.QUOTE_NONE, delimiter="\t")
             return list(reader)
 
 
@@ -97,16 +89,12 @@ def examples2features(examples, tokenizer, label_list, max_length=128):
             example.text_a,
             example.text_b,
             add_special_tokens=True,
-            max_length=max_length
+            max_length=max_length,
         )
 
         # Im so sorry for this xD
-        (
-            input_ids,
-            token_type_ids
-        ) = itemgetter(
-            "input_ids",
-            "token_type_ids"
+        (input_ids, token_type_ids) = itemgetter(
+            "input_ids", "token_type_ids"
         )(inputs)
         attention_mask = [1] * len(input_ids)
 
@@ -123,12 +111,14 @@ def examples2features(examples, tokenizer, label_list, max_length=128):
         assert len(token_type_ids) == max_length
         assert len(attention_mask) == max_length
 
-        features.append(InputFeatures(
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            label=label_map[example.label]
-        ))
+        features.append(
+            InputFeatures(
+                input_ids,
+                attention_mask,
+                token_type_ids,
+                label=label_map[example.label],
+            )
+        )
 
     # Log some examples to check
     for example, feature in islice(zip(examples, features), 5):
@@ -158,7 +148,7 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
             "uncased" if args.do_lower_case else "cased",
             "" if evaluate else processor.n_train,
             "dev" if evaluate else "train",
-            args.max_seq_len
+            args.max_seq_len,
         ),
     )
 
@@ -170,8 +160,8 @@ def load_dataset(args, processor, tokenizer, evaluate=False):
         # Im just partially sorry for this :D
         examples = (
             processor.get_dev_examples
-            if evaluate else
-            processor.get_train_examples
+            if evaluate
+            else processor.get_train_examples
         )(args.data_dir)
         features = examples2features(
             examples,
@@ -196,38 +186,36 @@ def train(args, dataset, model):
     tb_writer = SummaryWriter()
 
     # Apparently weight decay should not aply to bias and normalization layers
-    # list of two dicts, one where the 
-    no_decay = ['bias', 'LayerNorm.weight']
+    # list of two dicts, one where the
+    no_decay = ["bias", "LayerNorm.weight"]
     grouped_parameters = [
         {
-            'params': [
+            "params": [
                 p
-                for n, p
-                in model.named_parameters()
+                for n, p in model.named_parameters()
                 if any(nd in n for nd in no_decay)
             ],
-            'weight_decay': 0.0
+            "weight_decay": 0.0,
         },
         {
-            'params': [
+            "params": [
                 p
-                for n, p
-                in model.named_parameters()
+                for n, p in model.named_parameters()
                 if not any(nd in n for nd in no_decay)
             ],
-            'weight_decay': args.weight_decay
+            "weight_decay": args.weight_decay,
         },
     ]
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     total_steps = len(dataloader) * args.epochs
     optimizer = Adam(
-        grouped_parameters,
-        lr=args.learn_rate,
-        weight_decay=args.weight_decay
+        grouped_parameters, lr=args.learn_rate, weight_decay=args.weight_decay
     )
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=int(args.warmup*total_steps),  # warmup is a percentage
+        num_warmup_steps=int(
+            args.warmup * total_steps
+        ),  # warmup is a percentage
         num_training_steps=total_steps,
     )
 
@@ -239,7 +227,7 @@ def train(args, dataset, model):
     logger.info(f"  Total optimization steps = {total_steps}")
 
     global_step = 0
-    tr_loss, running_loss = 0., 0.
+    tr_loss, running_loss = 0.0, 0.0
     for _ in tqdm(range(args.epochs), desc="Epoch"):
         for step, batch in enumerate(tqdm(dataloader, desc="Iteration")):
             model.train()
@@ -251,7 +239,7 @@ def train(args, dataset, model):
                 input_ids=batch[0],
                 attention_mask=batch[1],
                 token_type_ids=batch[2],
-                labels=batch[3]
+                labels=batch[3],
             )[0]
             if args.n_gpu > 1:
                 loss = loss.mean()
@@ -261,12 +249,15 @@ def train(args, dataset, model):
 
             tr_loss += loss.item()
             running_loss += loss.item()
-            if (args.logging_steps > 0
-                    and global_step % args.logging_steps == 0):
+            if (
+                args.logging_steps > 0
+                and global_step % args.logging_steps == 0
+            ):
                 tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                 tb_writer.add_scalar(
-                    "loss", running_loss/args.logging_steps, global_step)
-                running_loss = 0.
+                    "loss", running_loss / args.logging_steps, global_step
+                )
+                running_loss = 0.0
 
             global_step += 1
 
@@ -300,7 +291,7 @@ def evaluate(args, model, dataset):
             gold_labels = torch.cat([gold_labels, batch[3].cpu()])
 
     correct = (preds.argmax(dim=1) == gold_labels).sum().item()
-    return {"acc": correct/len(preds)}
+    return {"acc": correct / len(preds)}
 
 
 def main(passed_args=None):
@@ -318,9 +309,13 @@ def main(passed_args=None):
 
     # Hyperparams that where relatively common
     parser.add_argument("--max-seq-len", default=128, type=int)
-    parser.add_argument("--weight-decay",  default=0.01, type=float)
-    parser.add_argument("--warmup", default=0.1, type=float,
-                        help="Percentage of warmup steps. In range [0, 1]")
+    parser.add_argument("--weight-decay", default=0.01, type=float)
+    parser.add_argument(
+        "--warmup",
+        default=0.1,
+        type=float,
+        help="Percentage of warmup steps. In range [0, 1]",
+    )
 
     # Specific params
     parser.add_argument("--train-size", default=10000, type=int)
@@ -336,11 +331,11 @@ def main(passed_args=None):
     parser.add_argument("--skip-eval", action="store_true")
     args = parser.parse_args(passed_args)
     if (
-            os.path.exists(args.output_dir)
-            and os.listdir(args.output_dir)  # verifica vacio
-            and not args.skip_train
-            and not args.overwrite_output_dir
-       ):
+        os.path.exists(args.output_dir)
+        and os.listdir(args.output_dir)  # verifica vacio
+        and not args.skip_train
+        and not args.overwrite_output_dir
+    ):
         raise ValueError(
             f"Output dir ({args.output_dir}) already exists and is not empty. "
             "Please use --overwrite-output-dir"
@@ -350,7 +345,8 @@ def main(passed_args=None):
     if "uncased" in args.model_dir and not args.do_lower_case:
         option = input(
             "WARNING: --model-dir contains 'uncased' but got no "
-            "--do-lower-case option.\nDo you want to continue? [Y/n] ")
+            "--do-lower-case option.\nDo you want to continue? [Y/n] "
+        )
         if option == "n":
             sys.exit(0)
 
@@ -364,9 +360,9 @@ def main(passed_args=None):
 
     print(args)
     logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-        datefmt='%m/%d/%Y %H:%M:%S',
-        level=logging.INFO
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
     )
     # ****************** Set the seed *********************
     set_seed(args)
@@ -381,18 +377,17 @@ def main(passed_args=None):
             finetuning_task="mldoc",
         )
         tokenizer = BertTokenizer.from_pretrained(
-            args.model_dir,
-            do_lower_case=args.do_lower_case
+            args.model_dir, do_lower_case=args.do_lower_case
         )
         model = BertForSequenceClassification.from_pretrained(
-            args.model_dir,
-            config=config,
+            args.model_dir, config=config,
         ).to(args.device)
 
         if args.n_gpu > 1:
             model = torch.nn.DataParallel(model)
         train_dataset = load_dataset(
-            args, processor, tokenizer, evaluate=False)
+            args, processor, tokenizer, evaluate=False
+        )
         # Train
         global_step, tr_loss = train(args, train_dataset, model)
         logger.info(f" global_step = {global_step}, average loss = {tr_loss}")
@@ -401,9 +396,8 @@ def main(passed_args=None):
         os.makedirs(args.output_dir, exist_ok=True)
         logger.info(f"Saving model checkpoint to {args.output_dir}")
         model_to_save = (
-            model.module
-            if isinstance(model, torch.nn.DataParallel) else
-            model)
+            model.module if isinstance(model, torch.nn.DataParallel) else model
+        )
         model_to_save.save_pretrained(args.output_dir)
         tokenizer.save_pretrained(args.output_dir)
 
@@ -413,12 +407,13 @@ def main(passed_args=None):
     if not args.skip_eval:
         # load saved if training was skipped
         if args.skip_train:
-            args = torch.load(
-                os.path.join(args.output_dir, "train_args.bin"))
+            args = torch.load(os.path.join(args.output_dir, "train_args.bin"))
             model = BertForSequenceClassification.from_pretrained(
-                args.output_dir)
+                args.output_dir
+            )
             tokenizer = BertTokenizer.from_pretrained(
-                args.output_dir, do_lower_case=args.do_lower_case)
+                args.output_dir, do_lower_case=args.do_lower_case
+            )
             model.to(args.device)
             if args.n_gpu > 1:
                 model = torch.nn.DataParallel(model)
@@ -427,8 +422,9 @@ def main(passed_args=None):
         results = evaluate(args, model, eval_dataset)
         # ********************* Save results ******************
         logger.info(f"Saving results to {args.output_dir}/dev_results.json")
-        logger.info(f"Training args are saved to {args.output_dir}/"
-                    "train_args.json")
+        logger.info(
+            f"Training args are saved to {args.output_dir}/" "train_args.json"
+        )
         if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
         with open(os.path.join(args.output_dir, "dev_results.json"), "w") as f:
@@ -440,5 +436,5 @@ def main(passed_args=None):
     return results
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

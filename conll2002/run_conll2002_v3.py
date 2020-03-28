@@ -7,29 +7,27 @@ again sometimes solves things
 
 I will also test making the script so that it can test
 """
-import os
-import sys
-import random
+import argparse
 import json
-from platform import node
+import logging
+import os
+import random
+import sys
+from collections import namedtuple
 from datetime import datetime
+from operator import itemgetter
+from platform import node
+
+import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.metrics import f1_score
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
-from collections import namedtuple
 from tqdm import tqdm
-from operator import itemgetter
-import argparse
-import logging
-import numpy as np
-from transformers import (
-    BertTokenizer,
-    BertForTokenClassification,
-    get_linear_schedule_with_warmup,
-)
-from sklearn.metrics import f1_score
+from transformers import (BertForTokenClassification, BertTokenizer,
+                          get_linear_schedule_with_warmup)
 
 logger = logging.getLogger("__name__")
 
@@ -44,8 +42,17 @@ Example = namedtuple("Example", ["tokens", "labels", "prediction_mask"])
 
 IGNORE_INDEX = nn.CrossEntropyLoss().ignore_index
 INWORD_PAD_LABEL = "PAD"
-LABEL_LIST = ['O', 'I-LOC', 'I-MISC', 'B-ORG', 'B-PER',
-              'I-ORG', 'B-MISC', 'B-LOC', 'I-PER']
+LABEL_LIST = [
+    "O",
+    "I-LOC",
+    "I-MISC",
+    "B-ORG",
+    "B-PER",
+    "I-ORG",
+    "B-MISC",
+    "B-LOC",
+    "I-PER",
+]
 
 LABEL_MAP = {label: i for i, label in enumerate(LABEL_LIST)}
 LABEL_MAP[INWORD_PAD_LABEL] = IGNORE_INDEX
@@ -86,8 +93,9 @@ def load_examples(args, tokenizer, stage):
             word, original_label = itemgetter(0, 2)(line.split())
             tokenized = tokenizer.tokenize(word)
             tokens += tokenized
-            labels += [original_label] + \
-                [INWORD_PAD_LABEL] * (len(tokenized) - 1)
+            labels += [original_label] + [INWORD_PAD_LABEL] * (
+                len(tokenized) - 1
+            )
 
     assert len(tokens) == len(labels)
 
@@ -95,23 +103,20 @@ def load_examples(args, tokenizer, stage):
     half_len = args.max_length // 2
     examples = []
     for i in tqdm(
-        range(0, len(tokens)-half_len, half_len),
-        desc="Creating examples",
+        range(0, len(tokens) - half_len, half_len), desc="Creating examples",
     ):
-        token_window = tokens[i:i+2*half_len]
-        label_window = labels[i:i+2*half_len]
+        token_window = tokens[i : i + 2 * half_len]
+        label_window = labels[i : i + 2 * half_len]
 
         if i == 0:
-            prediction_mask = [1]*2*half_len
+            prediction_mask = [1] * 2 * half_len
         else:
-            prediction_mask = [0]*half_len + [1]*(len(token_window) - half_len)
+            prediction_mask = [0] * half_len + [1] * (
+                len(token_window) - half_len
+            )
 
         assert len(token_window) == len(label_window) == len(prediction_mask)
-        example = Example(
-            token_window,
-            label_window,
-            prediction_mask
-        )
+        example = Example(token_window, label_window, prediction_mask)
         examples.append(example)
 
     # breakpoint()
@@ -122,9 +127,9 @@ def load_dataset(args, tokenizer, stage):
 
     examples = load_examples(args, tokenizer, stage)
     input_ids, labels, prediction_masks = [], [], []
-    for i, (tokens, ex_labels, prediction_mask) in enumerate(tqdm(
-        examples, desc="Converting examples"
-    )):
+    for i, (tokens, ex_labels, prediction_mask) in enumerate(
+        tqdm(examples, desc="Converting examples")
+    ):
         ids = tokenizer.convert_tokens_to_ids(tokens)
         label_ids = [LABEL_MAP[l] for l in ex_labels]
 
@@ -157,47 +162,42 @@ def train_model(args, model, dataset):
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     total_steps = len(dataloader) * args.epochs
 
-    no_decay = ['bias', 'LayerNorm.weight']
+    no_decay = ["bias", "LayerNorm.weight"]
     grouped_parameters = [
         {
-            'params': [
+            "params": [
                 p
-                for n, p
-                in model.named_parameters()
+                for n, p in model.named_parameters()
                 if any(nd in n for nd in no_decay)
             ],
-            'weight_decay': 0.0
+            "weight_decay": 0.0,
         },
         {
-            'params': [
+            "params": [
                 p
-                for n, p
-                in model.named_parameters()
+                for n, p in model.named_parameters()
                 if not any(nd in n for nd in no_decay)
             ],
-            'weight_decay': args.weight_decay
+            "weight_decay": args.weight_decay,
         },
     ]
     optimizer = Adam(
-        grouped_parameters,
-        lr=args.learn_rate,
-        weight_decay=args.weight_decay
+        grouped_parameters, lr=args.learn_rate, weight_decay=args.weight_decay
     )
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=int(args.warmup_steps*total_steps),  # warmup is a %
+        num_warmup_steps=int(args.warmup_steps * total_steps),  # warmup is a %
         num_training_steps=total_steps,
     )
 
     tb_writer = SummaryWriter(
         log_dir="runs/conll2002_{}_{}".format(
-            datetime.now().strftime('%b%d_%H-%M'),
-            node()
+            datetime.now().strftime("%b%d_%H-%M"), node()
         )
     )
     # *** Finally train ***
 
-    global_step, tr_loss, running_loss = 0, 0., 0.
+    global_step, tr_loss, running_loss = 0, 0.0, 0.0
     for _ in tqdm(range(args.epochs), desc="Epoch"):
         for step, batch in enumerate(tqdm(dataloader, desc="Iteration")):
             model.train()
@@ -205,10 +205,7 @@ def train_model(args, model, dataset):
 
             model.zero_grad()
 
-            loss = model(
-                input_ids=batch[0],
-                labels=batch[1],
-            )[0]
+            loss = model(input_ids=batch[0], labels=batch[1],)[0]
             if args.n_gpu > 1:
                 loss = loss.mean()
 
@@ -219,12 +216,15 @@ def train_model(args, model, dataset):
             tr_loss += loss.item()
             running_loss += loss.item()
 
-            if (args.logging_steps > 0
-                    and global_step % args.logging_steps == 0):
+            if (
+                args.logging_steps > 0
+                and global_step % args.logging_steps == 0
+            ):
                 tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                 tb_writer.add_scalar(
-                    "loss", running_loss/args.logging_steps, global_step)
-                running_loss = 0.
+                    "loss", running_loss / args.logging_steps, global_step
+                )
+                running_loss = 0.0
 
             global_step += 1
 
@@ -242,22 +242,23 @@ def evaluate(args, model, dataset, gold_labels):
         for batch in tqdm(dataloader, desc="Evaluating"):
             model.eval()
 
-            input_ids, labels, prediction_mask = \
-                [t.to(args.device) for t in batch]
+            input_ids, labels, prediction_mask = [
+                t.to(args.device) for t in batch
+            ]
 
             scores = model(input_ids)[0]
             # breakpoint()
             positions = prediction_mask.eq(1) * labels.ne(IGNORE_INDEX)
-            predictions = torch.cat([
-                predictions,
-                scores[positions].argmax(dim=1)
-            ])
+            predictions = torch.cat(
+                [predictions, scores[positions].argmax(dim=1)]
+            )
 
     # bring predictions back to cpu
     predictions = predictions.cpu()
     # check length
-    assert len(predictions) == len(gold_labels), \
-        f"{len(predictions)} != {len(gold_labels)}"
+    assert len(predictions) == len(
+        gold_labels
+    ), f"{len(predictions)} != {len(gold_labels)}"
 
     results = {
         "f1_score": f1_score(
@@ -278,7 +279,8 @@ def load_model(args, test):
     if test:
         try:
             prev_args = torch.load(
-                os.path.join(args.model_dir, "train_args.bin"))
+                os.path.join(args.model_dir, "train_args.bin")
+            )
             args.max_length = prev_args.max_length
             args.do_lower_case = prev_args.do_lower_case
             args.keep_accents = prev_args.keep_accents
@@ -324,26 +326,30 @@ def save_pretrained(args, model, tokenizer):
 
 
 def save_results(args, results, stage):
-    logger.info(f"Saving results to "
-                f"{os.path.join(args.output_dir, f'{stage}_results.json')}")
+    logger.info(
+        f"Saving results to "
+        f"{os.path.join(args.output_dir, f'{stage}_results.json')}"
+    )
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     results_file = open(
-        os.path.join(args.output_dir, f"{stage}_results.json"), "w")
+        os.path.join(args.output_dir, f"{stage}_results.json"), "w"
+    )
     with results_file:
         json.dump(results, results_file)
     if stage == "dev":
-        logger.info(f"Training args are saved to "
-                    f"{os.path.join(args.output_dir, 'train_args.json')}")
+        logger.info(
+            f"Training args are saved to "
+            f"{os.path.join(args.output_dir, 'train_args.json')}"
+        )
         with open(os.path.join(args.output_dir, "train_args.json"), "w") as f:
             json.dump(
                 {
                     key: value
-                    for key, value 
-                    in vars(args).items()
+                    for key, value in vars(args).items()
                     if key not in ("device", "func")
                 },
-                f
+                f,
             )
 
 
@@ -407,14 +413,15 @@ def main(passed_args=None):
         # is found in the model dir
         p.add_argument("--max-length", default=128, type=int)
         p.add_argument("--do-lower-case", action="store_true")
-        p.add_argument("--remove-accents", action="store_false",
-                       dest="keep_accents")
+        p.add_argument(
+            "--remove-accents", action="store_false", dest="keep_accents"
+        )
         # Other arguments
         p.add_argument(
             "--average-type",
             default="micro",
             type=str,
-            choices=("micro", "macro", "weighted", "samples")
+            choices=("micro", "macro", "weighted", "samples"),
         )
         p.add_argument("--disable-cuda", action="store_true")
 
@@ -440,7 +447,8 @@ def main(passed_args=None):
     if "uncased" in args.model_dir and not args.do_lower_case:
         option = input(
             "WARNING: --model-dir contains 'uncased' but got no "
-            "--do-lower-case option.\nDo you want to continue? [Y/n] ")
+            "--do-lower-case option.\nDo you want to continue? [Y/n] "
+        )
         if option == "n":
             sys.exit(0)
     if not args.disable_cuda and torch.cuda.is_available():
@@ -452,13 +460,13 @@ def main(passed_args=None):
 
     # *** Set up logging ***
     logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-        datefmt='%m/%d/%Y %H:%M:%S',
-        level=logging.INFO
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
     )
 
     return args.func(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

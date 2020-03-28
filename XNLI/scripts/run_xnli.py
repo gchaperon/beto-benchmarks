@@ -26,7 +26,7 @@ from collections import OrderedDict
 import tqdm
 import torch
 import numpy as np
-from torch.utils.data import (TensorDataset, RandomSampler, DataLoader)
+from torch.utils.data import TensorDataset, RandomSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim import AdamW
 from transformers import (
@@ -37,7 +37,7 @@ from transformers import (
     BertTokenizer,
     # aparentemente esta funcion es media agnostica a la tarea
     glue_convert_examples_to_features as convert_examples_to_features,
-    get_linear_schedule_with_warmup
+    get_linear_schedule_with_warmup,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,9 @@ class XNLIProcessor(DataProcessor):
 
     # RECORDAR IGNORAR LA PRIMERA LINEA !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    def __init__(self, train_language, dev_language=None,
-                 test_language=None, cased=True):
+    def __init__(
+        self, train_language, dev_language=None, test_language=None, cased=True
+    ):
         self.train_language = train_language
         self.dev_language = dev_language if dev_language else train_language
         self.test_language = test_language if test_language else train_language
@@ -74,19 +75,21 @@ class XNLIProcessor(DataProcessor):
                 data_dir,
                 "XNLI-MT-1.0",
                 "multinli",
-                f"multinli.train.{self.train_language}.tsv"
-            ))
+                f"multinli.train.{self.train_language}.tsv",
+            )
+        )
         examples = [
             InputExample(
                 guid=f"train-{i}",
                 text_a=row["premise"],
                 text_b=row["hypo"],
-                label=("contradiction"
-                       if row["label"] == "contradictory" else
-                       row["label"])
+                label=(
+                    "contradiction"
+                    if row["label"] == "contradictory"
+                    else row["label"]
+                ),
             )
-            for i, row
-            in enumerate(rows)
+            for i, row in enumerate(rows)
         ]
         return examples
 
@@ -103,20 +106,16 @@ class XNLIProcessor(DataProcessor):
             language = self.test_language
 
         rows = self._read_xnli_tsv(
-            os.path.join(
-                data_dir,
-                "XNLI-1.0",
-                f"xnli.{stage}.tsv"
-            ))
+            os.path.join(data_dir, "XNLI-1.0", f"xnli.{stage}.tsv")
+        )
         examples = [
             InputExample(
                 guid=f"{stage}-{i}",
                 text_a=row["sentence1"],
                 text_b=row["sentence2"],
-                label=row["gold_label"]
+                label=row["gold_label"],
             )
-            for i, row
-            in enumerate(rows)
+            for i, row in enumerate(rows)
             if row["language"] == language
         ]
         return examples
@@ -128,14 +127,17 @@ class XNLIProcessor(DataProcessor):
         """
         with open(input_path, "r") as tsvfile:
             reader = csv.DictReader(
-                tsvfile,
-                quoting=csv.QUOTE_NONE,
-                delimiter="\t"
+                tsvfile, quoting=csv.QUOTE_NONE, delimiter="\t"
             )
             if self.cased:
                 return list(reader)
             else:
-                return [OrderedDict((key, value.lower()) for key, value in row.items()) for row in reader]
+                return [
+                    OrderedDict(
+                        (key, value.lower()) for key, value in row.items()
+                    )
+                    for row in reader
+                ]
 
     @classmethod
     def get_labels(cls):
@@ -177,18 +179,17 @@ def load_dataset(data_dir, tokenizer, stage="train"):
     )
 
     all_input_ids = torch.tensor(
-        [f.input_ids for f in features], dtype=torch.long)
+        [f.input_ids for f in features], dtype=torch.long
+    )
     all_attention_mask = torch.tensor(
-        [f.attention_mask for f in features], dtype=torch.long)
+        [f.attention_mask for f in features], dtype=torch.long
+    )
     all_token_type_ids = torch.tensor(
-        [f.token_type_ids for f in features], dtype=torch.long)
-    all_labels = torch.tensor(
-        [f.label for f in features], dtype=torch.long)
+        [f.token_type_ids for f in features], dtype=torch.long
+    )
+    all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
     dataset = TensorDataset(
-        all_input_ids,
-        all_attention_mask,
-        all_token_type_ids,
-        all_labels
+        all_input_ids, all_attention_mask, all_token_type_ids, all_labels
     )
     # breakpoint()
     return dataset
@@ -202,35 +203,30 @@ def train(model, dataset):
     sampler = RandomSampler(dataset)
     dataloader = DataLoader(dataset, sampler=sampler, batch_size=16)
     # The optimizer
-    no_decay = ['bias', 'LayerNorm.weight']
+    no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
-            'params': [
+            "params": [
                 p
-                for n, p 
-                in model.named_parameters()
+                for n, p in model.named_parameters()
                 if not any(nd in n for nd in no_decay)
             ],
-            'weight_decay': 0.01  # Default for AdamW in torch
+            "weight_decay": 0.01,  # Default for AdamW in torch
         },
         {
-            'params': [
-                p 
-                for n, p 
-                in model.named_parameters()
+            "params": [
+                p
+                for n, p in model.named_parameters()
                 if any(nd in n for nd in no_decay)
             ],
-            'weight_decay': 0.0}
-        ]
-    optimizer = AdamW(
-        optimizer_grouped_parameters,
-        lr=5e-5,
-        eps=1e-8
-    )
+            "weight_decay": 0.0,
+        },
+    ]
+    optimizer = AdamW(optimizer_grouped_parameters, lr=5e-5, eps=1e-8)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=1,
-        num_training_steps=train_epochs * len(dataloader)
+        num_training_steps=train_epochs * len(dataloader),
     )
 
     if torch.cuda.device_count() > 1:
@@ -239,7 +235,9 @@ def train(model, dataset):
     logger.info("***** Running training *****")
     logger.info("  Num examples = %d", len(dataset))
     logger.info("  Num Epochs = %d", train_epochs)
-    logger.info("  Total optimization steps = %d", train_epochs * len(dataloader))
+    logger.info(
+        "  Total optimization steps = %d", train_epochs * len(dataloader)
+    )
 
     global_step = 0
     tr_loss, logging_loss = 0.0, 0.0
@@ -253,10 +251,17 @@ def train(model, dataset):
         for step, batch in enumerate(epoch_iterator):
             model.train()
             batch = tuple(t.to(DEVICE) for t in batch)
-            inputs = dict(zip(
-                ["input_ids", "attention_mask", "token_type_ids", "labels"],
-                batch
-            ))
+            inputs = dict(
+                zip(
+                    [
+                        "input_ids",
+                        "attention_mask",
+                        "token_type_ids",
+                        "labels",
+                    ],
+                    batch,
+                )
+            )
             outputs = model(**inputs)
             loss = outputs[0]
             if torch.cuda.device_count() > 1:
@@ -270,12 +275,13 @@ def train(model, dataset):
             global_step += 1
 
             if global_step % log_every == 0:
-                # Aca tengo caleta de dudas sobre que es lo que tengo que 
+                # Aca tengo caleta de dudas sobre que es lo que tengo que
                 # loggear y que es lo que tengo que devolver al final
                 # por ahora voy a llegar y copiar nomas
-                tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
+                tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                 tb_writer.add_scalar(
-                    'loss', (tr_loss - logging_loss)/log_every, global_step)
+                    "loss", (tr_loss - logging_loss) / log_every, global_step
+                )
                 logging_loss = tr_loss
 
     tb_writer.close()
@@ -303,26 +309,24 @@ def main(passed_args=None):
     # print(lines[:3])
 
     # Setup logging
-    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                        datefmt='%m/%d/%Y %H:%M:%S',
-                        level=logging.INFO)
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
 
     # Set seed
     set_seed(42)
 
     num_labels = len(XNLIProcessor.get_labels())
     config = BertConfig.from_pretrained(
-        args.model_dir,
-        num_labels=num_labels,
-        finetuning_task="xnli"
+        args.model_dir, num_labels=num_labels, finetuning_task="xnli"
     )
     tokenizer = BertTokenizer.from_pretrained(
-        args.model_dir,
-        do_lower_case=args.cased,
+        args.model_dir, do_lower_case=args.cased,
     )
     model = BertForSequenceClassification.from_pretrained(
-        args.model_dir,
-        config=config,
+        args.model_dir, config=config,
     )
     model.to(DEVICE)
     # breakpoint()
@@ -331,5 +335,5 @@ def main(passed_args=None):
     logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

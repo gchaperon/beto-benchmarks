@@ -25,12 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 class MLDocProcessorTest(DataProcessor):
-
     def get_test_examples(self, data_dir):
-        rows = self._read_tsv(os.path.join(
-            data_dir,
-            f"mldoc.es.test"
-        ))
+        rows = self._read_tsv(os.path.join(data_dir, f"mldoc.es.test"))
         # Spanish sentence tokenizer
         tokenizer = nltk.data.load("tokenizers/punkt/PY3/spanish.pickle")
         examples = []
@@ -44,7 +40,7 @@ class MLDocProcessorTest(DataProcessor):
                 f"test-{i}",
                 tokens[0],
                 tokens[1] if len(tokens) > 1 else None,
-                label=row[0]
+                label=row[0],
             )
             examples.append(example)
 
@@ -55,11 +51,7 @@ class MLDocProcessorTest(DataProcessor):
 
     def _read_tsv(self, fpath):
         with open(fpath, "r") as file:
-            reader = csv.reader(
-                file,
-                quoting=csv.QUOTE_NONE,
-                delimiter="\t"
-            )
+            reader = csv.reader(file, quoting=csv.QUOTE_NONE, delimiter="\t")
             return list(reader)
 
 
@@ -72,16 +64,12 @@ def examples2features(examples, tokenizer, label_list, max_length=128):
             example.text_a,
             example.text_b,
             add_special_tokens=True,
-            max_length=max_length
+            max_length=max_length,
         )
 
         # Im so sorry for this xD
-        (
-            input_ids,
-            token_type_ids
-        ) = itemgetter(
-            "input_ids",
-            "token_type_ids"
+        (input_ids, token_type_ids) = itemgetter(
+            "input_ids", "token_type_ids"
         )(inputs)
         attention_mask = [1] * len(input_ids)
 
@@ -98,12 +86,14 @@ def examples2features(examples, tokenizer, label_list, max_length=128):
         assert len(token_type_ids) == max_length
         assert len(attention_mask) == max_length
 
-        features.append(InputFeatures(
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            label=label_map[example.label]
-        ))
+        features.append(
+            InputFeatures(
+                input_ids,
+                attention_mask,
+                token_type_ids,
+                label=label_map[example.label],
+            )
+        )
 
     # Log some examples to check
     for example, feature in islice(zip(examples, features), 5):
@@ -123,8 +113,7 @@ def load_dataset(args, processor, tokenizer):
     cache_file = os.path.join(
         args.data_dir,
         "cached_features_beto_{}_mldoc_es_test_{}".format(
-            "uncased" if args.do_lower_case else "cased",
-            args.max_seq_len,
+            "uncased" if args.do_lower_case else "cased", args.max_seq_len,
         ),
     )
 
@@ -177,7 +166,7 @@ def evaluate(args, model, dataset):
             gold_labels = torch.cat([gold_labels, batch[3].cpu()])
 
     correct = (preds.argmax(dim=1) == gold_labels).sum().item()
-    return {"acc": correct/len(preds)}
+    return {"acc": correct / len(preds)}
 
 
 def main(passed_args=None):
@@ -207,15 +196,14 @@ def main(passed_args=None):
     args.max_seq_len = prev_args.max_seq_len
 
     logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-        datefmt='%m/%d/%Y %H:%M:%S',
-        level=logging.INFO
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
     )
 
     # ********* Load model ****************
     tokenizer = BertTokenizer.from_pretrained(
-        args.model_dir,
-        do_lower_case=args.do_lower_case
+        args.model_dir, do_lower_case=args.do_lower_case
     )
     model = BertForSequenceClassification.from_pretrained(args.model_dir)
     model.to(args.device)
@@ -236,5 +224,5 @@ def main(passed_args=None):
     print(results)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
