@@ -48,7 +48,11 @@ PAD_DEPREL_ID = PAD_HEAD = CrossEntropyLoss().ignore_index
 class Example(
     namedtuple(
         "Example",
-        [*(field + "s" for field in EXAMPLE_FIELDS), "prediction_mask"],
+        [
+            *(field + "s" for field in EXAMPLE_FIELDS),
+            "prediction_mask",
+            "head_idxs",
+        ],
     )
 ):
     __slots__ = ()
@@ -56,12 +60,13 @@ class Example(
     def __str__(self):
         return (
             "Example(\n"
-            f"ids={self.ids}\n"
-            f"forms={self.forms}\n"
-            f"upostags={self.upostags}\n"
-            f"heads={self.heads}\n"
-            f"deprels={self.deprels}\n"
-            f"prediction_mask={self.prediction_mask}\n"
+            f"ids={self.ids}\n\n"
+            f"forms={self.forms}\n\n"
+            f"upostags={self.upostags}\n\n"
+            f"heads={self.heads}\n\n"
+            f"deprels={self.deprels}\n\n"
+            f"prediction_mask={self.prediction_mask}\n\n"
+            f"head_idxs={self.head_idxs}\n"
             ")"
         )
 
@@ -91,8 +96,8 @@ def load_examples(args, tokenizer, stage):
         filtered_sentence = [
             token
             for token in sentence
-            if token["upostag"] not in IGNORED_POS
-            and isinstance(token["id"], int)
+            if isinstance(token["id"], int)
+            # and token["upostag"] not in IGNORED_POS
         ]
         # Apparently there is a sentence that is only a dot
         if filtered_sentence:
@@ -106,6 +111,11 @@ def load_examples(args, tokenizer, stage):
     examples = []
     for sentence in tqdm(filtered, desc="Creating examples"):
         tokenized_tuples = []
+        # Add BOW token (sorta)
+        tokenized_tuples.append(
+            (0, tokenizer.sep_token, "ROOT", PAD_HEAD, PAD_DEPREL, 0)
+        )
+
         for id_, form, upostag, head, deprel in map(
             itemgetter(*EXAMPLE_FIELDS), sentence
         ):
@@ -118,9 +128,18 @@ def load_examples(args, tokenizer, stage):
                     tokenized_tuples.append(
                         (PAD_ID, token, PAD_UPOSTAG, PAD_HEAD, PAD_DEPREL, 0)
                     )
+        # add head index to fix right shift due to subword tokenization
+        lists = list(map(list, zip(*tokenized_tuples)))
+        ids, heads = itemgetter(0, 3)(lists)
+        lists.append(
+            [
+                ids.index(head) if head != PAD_HEAD else PAD_HEAD
+                for head in heads
+            ]
+        )
 
         # breakpoint()
-        examples.append(Example(*zip(*tokenized_tuples)))
+        examples.append(Example(*lists))
         # examples.append()
         # id_, form, head, deprel =
         # for token in tokenizer.tokenize(word["form"]):
@@ -132,7 +151,7 @@ def load_examples(args, tokenizer, stage):
     unique_deprels = list(
         {rel for example in examples for rel in example.deprels}
     )
-
+    # breakpoint()
     return examples, unique_postags, unique_deprels
 
 
@@ -151,12 +170,18 @@ def load_dataset(args, tokenizer, stage):
         pos_tags_ids,
         attention_masks,
         rels_ids,
-        headss,
+        head_idxss,
         prediction_masks,
     ) = ([], [], [], [], [], [])
-    for (ids, forms, upostags, heads, deprels, prediction_mask) in tqdm(
-        examples, desc="Converting examples"
-    ):
+    for (
+        ids,
+        forms,
+        upostags,
+        _,
+        deprels,
+        prediction_mask,
+        head_idxs,
+    ) in tqdm(examples, desc="Converting examples"):
         token_ids = tokenizer.convert_tokens_to_ids(forms)
         tags_ids = [pos_mapping[tag] for tag in upostags]
         deprels_ids = [rel_mapping[rel] for rel in deprels]
@@ -171,14 +196,12 @@ def load_dataset(args, tokenizer, stage):
             tags_ids[: args.max_length]
             + [pos_mapping[PAD_UPOSTAG]] * pad_length
         )
-        heads = list(heads)[: args.max_length] + [PAD_HEAD] * pad_length
+        head_idxs = head_idxs[: args.max_length] + [PAD_HEAD] * pad_length
         deprels_ids = (
             deprels_ids[: args.max_length] + [PAD_DEPREL_ID] * pad_length
         )
 
-        prediction_mask = (
-            list(prediction_mask)[: args.max_length] + [0] * pad_length
-        )
+        prediction_mask = prediction_mask[: args.max_length] + [0] * pad_length
 
         attention_mask = [1] * (
             len(ids) if len(ids) <= args.max_length else args.max_length
@@ -188,7 +211,7 @@ def load_dataset(args, tokenizer, stage):
         pos_tags_ids.append(tags_ids)
         attention_masks.append(attention_mask)
         rels_ids.append(deprels_ids)
-        headss.append(heads)
+        head_idxss.append(head_idxs)
         prediction_masks.append(prediction_mask)
 
     for ll in (
@@ -196,7 +219,7 @@ def load_dataset(args, tokenizer, stage):
         pos_tags_ids,
         attention_masks,
         rels_ids,
-        headss,
+        head_idxss,
         prediction_masks,
     ):
         for l in ll:
@@ -207,7 +230,7 @@ def load_dataset(args, tokenizer, stage):
         torch.tensor(pos_tags_ids),
         torch.tensor(attention_masks),
         torch.tensor(rels_ids),
-        torch.tensor(headss),
+        torch.tensor(head_idxss),
         torch.tensor(prediction_masks),
     )
     # Display random example
@@ -219,7 +242,7 @@ def load_dataset(args, tokenizer, stage):
 
 
 def train(args, model, dataset):
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     total_steps = len(dataloader) * args.epochs
 
     criterion = CrossEntropyLoss()
@@ -275,17 +298,20 @@ def train(args, model, dataset):
                 ((t.to(args.device) for t in batch) for batch in dataloader),
                 desc="Iteration",
                 total=len(dataloader),
+                disable=True,
             )
         ):
             model.train()
 
             model.zero_grad()
 
+            head_mask = prediction_mask.clone().detach()
+            head_mask[:, 0] = 1
             s_arc, s_rel = model(
                 input_ids=input_ids,
                 pos_tags_ids=pos_tags_ids,
                 attention_mask=attention_mask,
-                prediction_mask=prediction_mask,
+                head_mask=head_mask,
             )
 
             # Its a bit more complicated to compute the loss in this case
@@ -312,7 +338,8 @@ def train(args, model, dataset):
             rel_loss = criterion(eii, rels_ids.view(-1))
 
             loss = arc_loss + rel_loss
-
+            # logger.info(f"Loss value: {loss.item()}")
+            # breakpoint()
             # if args.n_gpu > 1:
             #     loss = loss.mean()
 
@@ -327,9 +354,7 @@ def train(args, model, dataset):
                 args.logging_steps > 0
                 and global_step % args.logging_steps == 0
             ):
-                tb_writer.add_scalar(
-                    "lr", scheduler.get_lr()[0], global_step
-                )
+                tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
                 tb_writer.add_scalar(
                     "loss", running_loss / args.logging_steps, global_step
                 )

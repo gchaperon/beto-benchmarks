@@ -60,6 +60,7 @@ class Biaffine(nn.Module):
         nn.init.zeros_(self.weight)
 
     def forward(self, x, y):
+        # breakpoint()
         if self.bias_x:
             x = torch.cat((x, torch.ones_like(x[..., :1])), -1)
         if self.bias_y:
@@ -94,9 +95,10 @@ class BertForDependencyParsing(BertPreTrainedModel):
             n_in=N_MLP_REL, n_out=n_rels, bias_x=True, bias_y=True
         )
 
-    def forward(self, *, pos_tags_ids, prediction_mask, **kwargs):
+    def forward(self, *, pos_tags_ids, head_mask, **kwargs):
         # concat salida con pos tags
         output = self.bert(**kwargs)[0]
+        # breakpoint()
         pos_embeds = self.pos_embeds(pos_tags_ids)
         output = torch.cat((output, pos_embeds), dim=2)
         # apply MLPs to the BiLSTM output states
@@ -109,6 +111,8 @@ class BertForDependencyParsing(BertPreTrainedModel):
         s_rel = self.rel_attn(rel_d, rel_h).permute(0, 2, 3, 1)
 
         # -inf para las palabras que no pueden ser cabeza
-        s_arc.masked_fill_(~prediction_mask.unsqueeze(1).bool(), float("-inf"))
+        # son todas las que no van a ser predichas menos la primera,
+        # que es ROOT y si puede ser cabeza
+        s_arc.masked_fill_(~head_mask.unsqueeze(1).bool(), float("-inf"))
         # breakpoint()
         return s_arc, s_rel
