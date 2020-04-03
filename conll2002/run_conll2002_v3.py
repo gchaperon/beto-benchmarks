@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import subprocess
 import sys
 from collections import namedtuple
 from datetime import datetime
@@ -21,13 +22,15 @@ from platform import node
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from transformers import (BertForTokenClassification, BertTokenizer,
-                          get_linear_schedule_with_warmup)
+from transformers import (
+    BertForTokenClassification,
+    BertTokenizer,
+    get_linear_schedule_with_warmup,
+)
 
 logger = logging.getLogger("__name__")
 
@@ -233,7 +236,8 @@ def train_model(args, model, dataset):
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, dataset, gold_labels):
+# TODO: cambiar el valor harcodeao
+def evaluate(args, model, dataset, stage):
 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
@@ -255,23 +259,35 @@ def evaluate(args, model, dataset, gold_labels):
 
     # bring predictions back to cpu
     predictions = predictions.cpu()
-    # check length
+    lines = list(
+        map(
+            str.strip, open(os.path.join(args.data_dir, DATA_FILE_DICT[stage]))
+        )
+    )
     assert len(predictions) == len(
-        gold_labels
-    ), f"{len(predictions)} != {len(gold_labels)}"
+        list(filter(bool, lines))
+    ), "number of predictions doesn't match number of lines to be predicted"
 
-    results = {
-        "f1_score": f1_score(
-            gold_labels,
-            predictions,
-            # consider only the entity labels
-            labels=[LABEL_MAP[label] for label in LABEL_LIST if label != "O"],
-            average=args.average_type,
+    predictions_iter = (LABEL_LIST[pred] for pred in predictions)
+    lines_wpredicted = [
+        " ".join([line, next(predictions_iter)]) if line else ""
+        for line in lines
+    ]
+
+    conlleval_output = subprocess.run(
+        "./conlleval",
+        input="\n".join(lines_wpredicted).encode(),
+        capture_output=True,
+    )
+
+    return {
+        "f1_score": float(
+            conlleval_output.stdout.decode()
+            .splitlines()[1]
+            .split("FB1:")[1]
+            .strip()
         )
     }
-
-    # breakpoint()
-    return results
 
 
 def load_model(args, test):
@@ -301,16 +317,6 @@ def load_model(args, test):
         model = torch.nn.DataParallel(model)
 
     return model, tokenizer
-
-
-def get_gold_labels(args, stage):
-    gold_labels = []
-    with open(os.path.join(args.data_dir, DATA_FILE_DICT[stage])) as file:
-        for line in file:
-            if line != "\n":
-                gold_labels.append(LABEL_MAP[line.split()[2]])
-
-    return gold_labels
 
 
 def save_pretrained(args, model, tokenizer):
@@ -366,8 +372,6 @@ def train_main(args):
             f"Output dir ({args.output_dir}) already exists and is not empty. "
             "Please use --overwrite-output-dir"
         )
-    # *** Set the seed ***
-    set_seed(args)
     # *** Load stuff ***
     model, tokenizer = load_model(args, test=False)
 
@@ -377,10 +381,8 @@ def train_main(args):
     save_pretrained(args, model, tokenizer)
 
     # *** Evaluate ! ***
-    # get the gold labels from file
-    gold_labels = get_gold_labels(args, "dev")
     dev_dataset = load_dataset(args, tokenizer, "dev")
-    results = evaluate(args, model, dev_dataset, gold_labels)
+    results = evaluate(args, model, dev_dataset, "dev")
     save_results(args, results, "dev")
     logger.info(f"Dev results: {results}")
     return results
@@ -389,8 +391,7 @@ def train_main(args):
 def test_main(args):
     model, tokenizer = load_model(args, test=True)
     test_dataset = load_dataset(args, tokenizer, "test")
-    gold_labels = get_gold_labels(args, "test")
-    results = evaluate(args, model, test_dataset, gold_labels)
+    results = evaluate(args, model, test_dataset, "test")
     save_results(args, results, "test")
     logger.info(f"Test results: {results}")
     return results
@@ -424,6 +425,7 @@ def main(passed_args=None):
             choices=("micro", "macro", "weighted", "samples"),
         )
         p.add_argument("--disable-cuda", action="store_true")
+        p.add_argument("--seed", default=1234, type=int)
 
     # Specific for train
     parser_train.add_argument("--learn-rate", default=3e-5, type=float)
@@ -433,7 +435,7 @@ def main(passed_args=None):
     parser_train.add_argument("--warmup-steps", default=0.1, type=float)
 
     parser_train.add_argument("--overwrite-output-dir", action="store_true")
-    parser_train.add_argument("--seed", default=1234, type=int)
+
     parser_train.add_argument("--logging-steps", default=50, type=int)
 
     # Set default functions
@@ -464,6 +466,8 @@ def main(passed_args=None):
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
+    # *** Set the seed ***
+    set_seed(args)
 
     return args.func(args)
 

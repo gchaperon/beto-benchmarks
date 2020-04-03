@@ -6,7 +6,6 @@ import sys
 from collections import namedtuple
 from datetime import datetime
 from enum import Enum, auto
-from itertools import zip_longest
 from operator import itemgetter
 from platform import node
 
@@ -18,11 +17,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from transformers import (
-    BertModel,
-    BertTokenizer,
-    get_linear_schedule_with_warmup,
-)
+from transformers import BertTokenizer, get_linear_schedule_with_warmup
 
 logger = logging.getLogger("__name__")
 
@@ -367,7 +362,18 @@ def train(args, model, dataset):
     return global_step, tr_loss / global_step
 
 
+def decode(args, s_arc, s_rel, mask):
+    ...
+
+
+def evaluate(args, model, dev_dataset, stage):
+    ...
+
+
 def train_main(args):
+    # TODO: verificar que los postags/deprels
+    # sean los mismos en todos los splits
+
     # breakpoint()
 
     tokenizer = BertTokenizer.from_pretrained(
@@ -375,7 +381,7 @@ def train_main(args):
     )
     # TODO: cambiar stage
 
-    dataset, unique_postags, unique_deprels, *_ = load_dataset(
+    train_dataset, unique_postags, unique_deprels, *_ = load_dataset(
         args, tokenizer, Stage.TEST
     )
     # TODO: aprender a usar torchtext
@@ -386,8 +392,15 @@ def train_main(args):
         n_rels=len(unique_deprels),
     ).to(args.device)
 
-    asd = train(args, model, dataset)
-    breakpoint()
+    train(args, model, train_dataset)
+
+    # ** Evaluate **
+    dev_dataset, *_ = load_dataset(args, tokenizer, Stage.DEV)
+    results = evaluate(args, model, dev_dataset, Stage.DEV)
+    logger.info(f"Dev results: {results}")
+
+    return results
+
     # input_ids = dataset[0][0].unsqueeze(0)
     # pos_tags_ids = dataset[0][1].unsqueeze(0)
     # attention_mask = dataset[0][2].unsqueeze(0)
@@ -461,7 +474,7 @@ def main(passed_args=None):
         level=logging.INFO,
     )
 
-    args.func(args)
+    return args.func(args)
 
 
 if __name__ == "__main__":
