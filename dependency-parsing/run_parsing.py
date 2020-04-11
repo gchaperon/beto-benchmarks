@@ -13,11 +13,13 @@ import torch
 from conllu import parse_incr
 from model import BertForDependencyParsing
 from torch.nn import CrossEntropyLoss
+from torch.nn.utils.rnn import pad_sequence
 from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import BertTokenizer, get_linear_schedule_with_warmup
+from utils import eisner
 
 logger = logging.getLogger("__name__")
 
@@ -160,6 +162,7 @@ def load_dataset(args, tokenizer, stage):
     rel_mapping = {rel: i for i, rel in enumerate(unique_deprels)}
     rel_mapping[PAD_DEPREL] = PAD_DEPREL_ID
 
+    # Initialize lists
     (
         input_ids,
         pos_tags_ids,
@@ -168,6 +171,8 @@ def load_dataset(args, tokenizer, stage):
         head_idxss,
         prediction_masks,
     ) = ([], [], [], [], [], [])
+
+    # Pad sequences
     for (
         ids,
         forms,
@@ -237,6 +242,7 @@ def load_dataset(args, tokenizer, stage):
 
 
 def train(args, model, dataset):
+    # TODO: cambiar el shuffle
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     total_steps = len(dataloader) * args.epochs
 
@@ -293,7 +299,7 @@ def train(args, model, dataset):
                 ((t.to(args.device) for t in batch) for batch in dataloader),
                 desc="Iteration",
                 total=len(dataloader),
-                disable=True,
+                # disable=True,
             )
         ):
             model.train()
@@ -308,7 +314,8 @@ def train(args, model, dataset):
                 attention_mask=attention_mask,
                 head_mask=head_mask,
             )
-
+            if (step + 1) % 3 == 0:
+                breakpoint()
             # Its a bit more complicated to compute the loss in this case
             # breakpoint()
             # TODO: compute loss
@@ -363,7 +370,28 @@ def train(args, model, dataset):
 
 
 def decode(args, s_arc, s_rel, mask):
-    ...
+    # breakpoint()
+
+    # Lo voy a hacer de a uno porque no c como usar eisner mejor
+    arc_preds = []
+    for t, m in zip(s_arc, mask):
+        # breakpoint()
+        idx = torch.arange(t.shape[0])[m.bool()]
+        temp_mask = torch.ones(m.sum()).bool()
+        temp_mask[0] = 0
+        arc_preds.append(
+            eisner(
+                t[idx.unsqueeze(-1), idx].unsqueeze(0),
+                temp_mask.unsqueeze(0).bool(),
+            ).squeeze()
+        )
+    breakpoint()
+    # arc_preds = eisner(s_arc, mask)
+    rel_preds = s_rel.argmax(-1)
+    breakpoint()
+    rel_preds = rel_preds.gather(-1, arc_preds.unsqueeze(-1)).squeeze(-1)
+
+    return arc_preds, rel_preds
 
 
 def evaluate(args, model, dev_dataset, stage):
